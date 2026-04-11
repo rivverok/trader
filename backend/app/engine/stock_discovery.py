@@ -13,6 +13,7 @@ from app.analysis import call_claude, load_prompt
 from app.config import settings
 from app.models.discovery import DiscoveryLog, WatchlistHint
 from app.models.economic import EconomicIndicator
+from app.models.price import Price
 from app.models.stock import Stock
 from app.models.analysis import ContextSynthesis
 from app.models.portfolio import PortfolioPosition
@@ -506,7 +507,7 @@ async def _get_economic_context(db: AsyncSession) -> list[dict]:
 
 
 async def _get_watchlist_context(db: AsyncSession) -> dict:
-    """Get current watchlist stocks with their latest synthesis scores."""
+    """Get current watchlist stocks with synthesis scores and performance data."""
     result = await db.execute(
         select(Stock).where(Stock.on_watchlist.is_(True)).order_by(Stock.symbol)
     )
@@ -532,6 +533,54 @@ async def _get_watchlist_context(db: AsyncSession) -> dict:
             entry["sentiment"] = synth.overall_sentiment
             entry["confidence"] = synth.confidence
             entry["key_factors"] = synth.key_factors
+
+        # When was this stock added to the watchlist?
+        add_log = await db.execute(
+            select(DiscoveryLog)
+            .where(
+                DiscoveryLog.symbol == stock.symbol,
+                DiscoveryLog.action == "add",
+            )
+            .order_by(DiscoveryLog.created_at.desc())
+            .limit(1)
+        )
+        add_entry = add_log.scalar_one_or_none()
+        if add_entry:
+            entry["added_at"] = add_entry.created_at.isoformat()
+            days_on = (datetime.now(timezone.utc) - add_entry.created_at).days
+            entry["days_on_watchlist"] = days_on
+
+            # Price at the time of addition (closest daily close)
+            add_price_result = await db.execute(
+                select(Price.close)
+                .where(
+                    Price.stock_id == stock.id,
+                    Price.interval == "1Day",
+                    Price.timestamp <= add_entry.created_at,
+                )
+                .order_by(Price.timestamp.desc())
+                .limit(1)
+            )
+            add_price = add_price_result.scalar_one_or_none()
+            if add_price:
+                entry["price_at_add"] = round(add_price, 2)
+
+        # Current/latest price
+        latest_price_result = await db.execute(
+            select(Price.close)
+            .where(Price.stock_id == stock.id, Price.interval == "1Day")
+            .order_by(Price.timestamp.desc())
+            .limit(1)
+        )
+        latest_price = latest_price_result.scalar_one_or_none()
+        if latest_price:
+            entry["current_price"] = round(latest_price, 2)
+
+        # Calculate performance since addition
+        if entry.get("price_at_add") and entry.get("current_price"):
+            change_pct = ((entry["current_price"] - entry["price_at_add"]) / entry["price_at_add"]) * 100
+            entry["change_since_added_pct"] = round(change_pct, 2)
+
         entries.append(entry)
 
     return {"count": len(stocks), "stocks": entries}
@@ -656,6 +705,14 @@ def _build_user_message(
             parts = [f"**{s['symbol']}** — {s['name']}"]
             if s.get("sector"):
                 parts.append(f"Sector: {s['sector']}")
+            if s.get("days_on_watchlist") is not None:
+                parts.append(f"On watchlist: {s['days_on_watchlist']} days")
+            if s.get("price_at_add") is not None and s.get("current_price") is not None:
+                parts.append(f"Price: ${s['price_at_add']:.2f} → ${s['current_price']:.2f}")
+            elif s.get("current_price") is not None:
+                parts.append(f"Current price: ${s['current_price']:.2f}")
+            if s.get("change_since_added_pct") is not None:
+                parts.append(f"Since added: {s['change_since_added_pct']:+.1f}%")
             if s.get("sentiment") is not None:
                 parts.append(f"AI Sentiment: {s['sentiment']:.2f}")
             if s.get("confidence") is not None:

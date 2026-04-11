@@ -35,10 +35,13 @@ Guidelines for ADDING stocks:
 - Limit additions to 5 per run, but AIM for 3–5 on initial runs when watchlist is small
 
 Guidelines for REMOVING stocks:
-- Remove stocks with deteriorating AI sentiment and confidence scores
-- Remove if sector faces persistent headwinds given current economic data
-- Don't remove stocks currently held in portfolio
-- Keep watchlist focused — quality over quantity
+- **Actively prune underperformers** — if a stock has been on the watchlist 14+ days with negative price performance and no clear catalyst ahead, REMOVE IT. Don't let losers linger.
+- **Cut dead weight** — if a stock has been on the watchlist 30+ days and hasn't generated any interesting trading signals or price movement, it's taking up a slot that could go to a better pick. Remove it.
+- Deteriorating AI sentiment + declining price = strong removal signal
+- If sector faces persistent headwinds given current economic data, remove unless there's a stock-specific catalyst
+- Don't remove stocks currently held in portfolio (the system will block this anyway)
+- Keep watchlist focused — quality over quantity. A lean 10-stock watchlist of high-conviction picks beats a bloated 20-stock watchlist of "maybe" stocks.
+- **Every stock should earn its spot.** If you can't articulate a clear reason to KEEP a stock, that's a reason to remove it.
 
 Produce a JSON response:
 
