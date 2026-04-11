@@ -61,35 +61,41 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
     skipped = 0
     blocked = 0
     errors = 0
+    details: list[dict[str, Any]] = []
 
     for stock in stocks:
         try:
             pkg = await _aggregate_signals(db, stock)
             if pkg is None:
                 skipped += 1
+                details.append({"symbol": stock.symbol, "outcome": "skipped", "reason": "no signals (no ML signal, no synthesis, no analyst input)"})
                 continue
 
             # Only act on meaningful signals (not hold-ish)
             if abs(pkg.combined_score) < 0.15:
                 logger.info("%s: score %.3f too weak, skipping", stock.symbol, pkg.combined_score)
                 skipped += 1
+                details.append({"symbol": stock.symbol, "outcome": "skipped", "reason": f"score {pkg.combined_score:+.3f} too weak (threshold ±0.15)"})
                 continue
 
             # Claude decision synthesis
             decision = await _claude_decision(db, pkg)
             if decision is None:
                 skipped += 1
+                details.append({"symbol": stock.symbol, "outcome": "skipped", "reason": "Claude decision failed"})
                 continue
 
             action = _map_recommendation_to_action(decision.get("recommendation", "hold"), pkg)
             if action is None:
                 skipped += 1
+                details.append({"symbol": stock.symbol, "outcome": "skipped", "reason": f"Claude recommended hold (rec={decision.get('recommendation', 'hold')})"})
                 continue
 
             # Position sizing
             price = pkg.current_price or 0.0
             if price <= 0:
                 skipped += 1
+                details.append({"symbol": stock.symbol, "outcome": "skipped", "reason": "no price data"})
                 continue
 
             shares = calculate_position_size(
@@ -102,6 +108,7 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
             )
             if shares <= 0:
                 skipped += 1
+                details.append({"symbol": stock.symbol, "outcome": "skipped", "reason": f"position size 0 shares ({action} @ ${price:.2f}, confidence={decision.get('confidence', pkg.combined_confidence):.3f})"})
                 continue
 
             # Risk check
@@ -134,13 +141,16 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
             db.add(trade)
             if allowed:
                 proposed += 1
+                details.append({"symbol": stock.symbol, "outcome": "proposed", "action": action, "shares": shares, "price": price, "confidence": decision.get("confidence", pkg.combined_confidence)})
             else:
                 blocked += 1
+                details.append({"symbol": stock.symbol, "outcome": "blocked", "action": action, "reason": reason})
                 logger.info("%s: blocked — %s", stock.symbol, reason)
 
         except Exception as e:
             logger.error("Decision cycle error for %s: %s", stock.symbol, e)
             errors += 1
+            details.append({"symbol": stock.symbol, "outcome": "error", "reason": str(e)})
 
     await db.commit()
     return {
@@ -149,6 +159,7 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
         "skipped": skipped,
         "blocked": blocked,
         "errors": errors,
+        "details": details,
     }
 
 

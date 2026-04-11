@@ -121,13 +121,8 @@ async def check_trade_allowed(
             + (" (live mode)" if live else "")
         )
 
-    # 8. Market hours check (info only — Alpaca handles this for execution)
-    now = datetime.now(timezone.utc)
-    hour_et = (now.hour - 4) % 24  # rough UTC→ET
-    if now.weekday() >= 5:
-        return False, "Market closed (weekend)"
-    if hour_et < 9 or hour_et >= 16:
-        return False, "Market closed (outside 9:30-16:00 ET)"
+    # 8. Market hours check — NOT enforced here.
+    #    Proposals can be created any time; execution tasks handle market hours.
 
     return True, "ok"
 
