@@ -47,7 +47,7 @@ def _get_default_schedule() -> dict:
         },
         "generate-ml-signals": {
             "task": "generate_ml_signals",
-            "schedule": crontab(minute=0, hour="9-16", day_of_week="mon-fri"),
+            "schedule": crontab(minute=0, hour="7-20", day_of_week="mon-fri"),
         },
         "retrain-model": {
             "task": "retrain_model",
@@ -55,7 +55,7 @@ def _get_default_schedule() -> dict:
         },
         "run-decision-cycle": {
             "task": "run_decision_cycle",
-            "schedule": crontab(minute="0,30", hour="9-16", day_of_week="mon-fri"),
+            "schedule": crontab(minute="0,30", hour="7-20", day_of_week="mon-fri"),
         },
         "execute-approved-trades": {
             "task": "execute_approved_trades",

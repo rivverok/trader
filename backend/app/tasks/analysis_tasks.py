@@ -15,6 +15,8 @@ _analysis_status: dict[str, dict[str, Any]] = {}
 
 
 def _update_status(task_name: str, result: dict):
+    from app.tasks.task_status import update_task_status
+    update_task_status(task_name, result)
     _analysis_status[task_name] = {
         "last_run": datetime.now(timezone.utc).isoformat(),
         "last_result": result,

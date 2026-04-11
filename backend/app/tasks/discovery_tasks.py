@@ -49,11 +49,15 @@ def discover_stocks(self) -> dict:
 
     try:
         result = _run_async(_run())
+        from app.tasks.task_status import update_task_status
+        update_task_status("discover_stocks", result)
         _discovery_status["last_run"] = datetime.now(timezone.utc).isoformat()
         _discovery_status["last_result"] = result
         logger.info("Stock discovery complete: %s", result)
         return result
     except Exception as exc:
+        from app.tasks.task_status import update_task_status
+        update_task_status("discover_stocks", {"status": "error", "error": str(exc)})
         _discovery_status["last_run"] = datetime.now(timezone.utc).isoformat()
         _discovery_status["last_result"] = {"status": "error", "error": str(exc)}
         logger.error("Stock discovery failed: %s", exc)

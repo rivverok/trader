@@ -1,0 +1,78 @@
+"""Shared task status tracker — stores last-run info in Redis so the API can read it."""
+
+import json
+import logging
+from datetime import datetime, timezone
+
+import redis
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+_redis: redis.Redis | None = None
+
+# Map Celery task names → beat schedule keys
+_TASK_TO_SCHEDULE_KEY = {
+    "collect_prices": "collect-prices",
+    "collect_daily_bars": "collect-daily-bars",
+    "collect_news": "collect-news",
+    "collect_economic_data": "collect-economic-data",
+    "collect_filings": "collect-filings",
+    "backfill_historical_prices": "backfill-prices",
+    "analyze_news_sentiment": "analyze-news-sentiment",
+    "analyze_filings": "analyze-filings",
+    "run_context_synthesis": "run-context-synthesis",
+    "generate_ml_signals": "generate-ml-signals",
+    "retrain_model": "retrain-model",
+    "run_backtest": "run-backtest",
+    "run_decision_cycle": "run-decision-cycle",
+    "execute_approved_trades": "execute-approved-trades",
+    "auto_execute_proposals": "auto-execute-proposals",
+    "sync_portfolio": "sync-portfolio",
+    "check_stop_loss_orders": "check-stop-loss-orders",
+    "discover_stocks": "discover-stocks",
+    "check_model_staleness": "check-model-staleness",
+}
+
+REDIS_KEY_PREFIX = "task_status:"
+
+
+def _get_redis() -> redis.Redis:
+    global _redis
+    if _redis is None:
+        _redis = redis.from_url(settings.get_redis_url(), decode_responses=True)
+    return _redis
+
+
+def update_task_status(task_name: str, result: dict):
+    """Record a task run in Redis. Called from Celery tasks after completion."""
+    try:
+        r = _get_redis()
+        key = f"{REDIS_KEY_PREFIX}{task_name}"
+
+        # Increment run count
+        r.hincrby(key, "total_run_count", 1)
+        r.hset(key, "last_run", datetime.now(timezone.utc).isoformat())
+        r.hset(key, "last_result", json.dumps(result, default=str))
+    except Exception as e:
+        logger.warning("Failed to update task status for %s: %s", task_name, e)
+
+
+def get_all_task_status() -> dict[str, dict]:
+    """Read all task statuses from Redis. Called from the API."""
+    try:
+        r = _get_redis()
+        result = {}
+        for task_name, schedule_key in _TASK_TO_SCHEDULE_KEY.items():
+            key = f"{REDIS_KEY_PREFIX}{task_name}"
+            data = r.hgetall(key)
+            if data:
+                result[schedule_key] = {
+                    "last_run": data.get("last_run"),
+                    "total_run_count": int(data.get("total_run_count", 0)),
+                }
+        return result
+    except Exception as e:
+        logger.warning("Failed to read task statuses: %s", e)
+        return {}

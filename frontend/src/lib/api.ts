@@ -580,6 +580,10 @@ export const api = {
         `/trades/${id}/reevaluate`,
         { method: "POST" }
       ),
+    runDecisionCycle: () =>
+      fetchApi<{ task_id: string }>("/trades/run-decision-cycle", {
+        method: "POST",
+      }),
   },
   risk: {
     status: () => fetchApi<RiskStatus>("/risk/status"),

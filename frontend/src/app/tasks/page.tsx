@@ -416,6 +416,16 @@ function ScheduleRow({
         </td>
         <td className="p-3 font-mono text-xs">{task.name}</td>
         <td className="p-3 text-xs text-muted-foreground">{formatSchedule(task.schedule)}</td>
+        <td className="p-3 text-xs text-muted-foreground">
+          {task.last_run
+            ? new Date(task.last_run).toLocaleString(undefined, {
+                month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+              })
+            : "\u2014"}
+        </td>
+        <td className="p-3 text-xs text-right tabular-nums text-muted-foreground">
+          {task.total_run_count ?? "\u2014"}
+        </td>
         <td className="p-3 text-right">
           <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={startEdit}>
             Edit
@@ -424,7 +434,7 @@ function ScheduleRow({
       </tr>
       {editing && (
         <tr className="border-b last:border-0 bg-muted/30">
-          <td colSpan={4} className="p-4">
+          <td colSpan={6} className="p-4">
             <div className="flex flex-col gap-3 max-w-lg">
               <div className="flex gap-4 text-xs">
                 <label className="flex items-center gap-1.5">
@@ -653,6 +663,7 @@ export default function TasksPage() {
               { label: "Context Synthesis", desc: "Claude AI creates holistic per-stock analysis from all data sources", action: () => api.analysis.trigger("synthesis") },
               { label: "ML Signals", desc: "Run ML model to generate buy/sell/hold predictions for all watchlist stocks", action: () => api.ml.generateSignals() },
               { label: "Retrain ML", desc: "Retrain XGBoost/LightGBM models on latest price and feature data", action: () => api.ml.retrain() },
+              { label: "Decision Cycle", desc: "Aggregate all signals, ask Claude for trade recommendations, create proposals", action: () => api.trades.runDecisionCycle() },
             ].map((t) => (
               <div key={t.label} className="flex items-center justify-between rounded-lg border p-3">
                 <div className="min-w-0 flex-1">
@@ -804,6 +815,8 @@ export default function TasksPage() {
                   <th className="w-8 p-3"></th>
                   <th className="text-left p-3 font-medium">Task</th>
                   <th className="text-left p-3 font-medium">Schedule</th>
+                  <th className="text-left p-3 font-medium">Last Run</th>
+                  <th className="text-right p-3 font-medium">Runs</th>
                   <th className="text-right p-3 font-medium">Actions</th>
                 </tr>
               </thead>
@@ -817,7 +830,7 @@ export default function TasksPage() {
                 ))}
                 {periodicTasks.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="p-3 text-center text-muted-foreground">
+                    <td colSpan={6} className="p-3 text-center text-muted-foreground">
                       No scheduled tasks found
                     </td>
                   </tr>

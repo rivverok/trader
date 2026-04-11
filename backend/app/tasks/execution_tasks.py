@@ -30,7 +30,10 @@ def _run_async(coro):
 @shared_task(name="execute_approved_trades")
 def execute_approved_trades_task():
     """Execute all approved (but not yet executed) trades. Runs every 1 minute."""
-    return _run_async(_execute_approved_trades())
+    from app.tasks.task_status import update_task_status
+    result = _run_async(_execute_approved_trades())
+    update_task_status("execute_approved_trades", result)
+    return result
 
 
 async def _execute_approved_trades():
@@ -68,7 +71,10 @@ async def _execute_approved_trades():
 @shared_task(name="sync_portfolio")
 def sync_portfolio_task():
     """Sync portfolio from Alpaca. Runs every 5 minutes."""
-    return _run_async(_sync_portfolio())
+    from app.tasks.task_status import update_task_status
+    result = _run_async(_sync_portfolio())
+    update_task_status("sync_portfolio", result)
+    return result
 
 
 async def _sync_portfolio():
@@ -95,7 +101,10 @@ async def _sync_portfolio():
 @shared_task(name="check_stop_loss_orders")
 def check_stop_loss_orders_task():
     """Monitor stop-loss and take-profit order status. Runs every 1 minute."""
-    return _run_async(_check_stop_loss_orders())
+    from app.tasks.task_status import update_task_status
+    result = _run_async(_check_stop_loss_orders())
+    update_task_status("check_stop_loss_orders", result)
+    return result
 
 
 async def _check_stop_loss_orders():
@@ -135,7 +144,10 @@ async def _check_stop_loss_orders():
 def auto_execute_proposals_task():
     """When auto_execute is on, auto-approve proposed trades that pass risk checks.
     Runs every 1 minute."""
-    return _run_async(_auto_execute_proposals())
+    from app.tasks.task_status import update_task_status
+    result = _run_async(_auto_execute_proposals())
+    update_task_status("auto_execute_proposals", result)
+    return result
 
 
 async def _auto_execute_proposals():

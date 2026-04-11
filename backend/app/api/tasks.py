@@ -137,7 +137,9 @@ async def list_tasks():
 
     # We also need to show disabled tasks — rebuild from defaults
     from app.celery_app import _get_default_schedule
+    from app.tasks.task_status import get_all_task_status
     all_defaults = _get_default_schedule()
+    task_statuses = get_all_task_status()
 
     for task_key, task_conf in all_defaults.items():
         ovr = overrides.get(task_key, {})
@@ -151,11 +153,14 @@ async def list_tasks():
         else:
             schedule = task_conf.get("schedule", "")
 
+        status = task_statuses.get(task_key, {})
         periodic_tasks.append(ScheduledTask(
             key=task_key,
             name=task_conf.get("task", task_key),
             schedule=str(schedule),
             enabled=enabled,
+            last_run=status.get("last_run"),
+            total_run_count=status.get("total_run_count"),
         ))
 
     return TaskListResponse(

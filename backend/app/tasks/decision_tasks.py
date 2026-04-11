@@ -47,6 +47,8 @@ def run_decision_cycle_task(self) -> dict:
 
     result = _run_async(_run())
 
+    from app.tasks.task_status import update_task_status
+    update_task_status("run_decision_cycle", result)
     _decision_status["last_run"] = datetime.now(timezone.utc).isoformat()
     _decision_status["last_result"] = result
 
