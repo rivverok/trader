@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     RISK_MAX_SECTOR_PCT: float = 25.0
     RISK_DAILY_LOSS_LIMIT: float = 500.0
     RISK_MAX_DRAWDOWN_PCT: float = 15.0
-    RISK_MIN_CONFIDENCE: float = 0.6
+    RISK_MIN_CONFIDENCE: float = 0.25
 
     # ── Signal Weights ──
     SIGNAL_WEIGHT_ML: float = 0.3

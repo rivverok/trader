@@ -24,7 +24,7 @@ class RiskState(TimestampMixin, Base):
     max_sector_pct: Mapped[float] = mapped_column(Float, nullable=False, default=25.0)
     daily_loss_limit: Mapped[float] = mapped_column(Float, nullable=False, default=500.0)
     max_drawdown_pct: Mapped[float] = mapped_column(Float, nullable=False, default=15.0)
-    min_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.6)
+    min_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.25)
 
     # ── System control flags ──
     auto_execute: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

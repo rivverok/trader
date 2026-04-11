@@ -7,6 +7,8 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import func
+
 from app.analysis import call_claude, load_prompt
 from app.config import settings
 from app.engine.position_sizer import calculate_position_size
@@ -17,7 +19,7 @@ from app.models.portfolio import PortfolioPosition, PortfolioSnapshot
 from app.models.price import Price
 from app.models.signal import MLSignal
 from app.models.stock import Stock
-from app.models.trade import ProposedTrade
+from app.models.trade import ProposedTrade, Trade
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,9 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
     growth_mode = risk_state.growth_mode
     portfolio_value = await _get_portfolio_value(db, use_live=growth_mode)
 
+    # Build portfolio context so Claude can dynamically adjust aggression
+    portfolio_ctx = await _build_portfolio_context(db, risk_state, portfolio_value)
+
     proposed = 0
     skipped = 0
     blocked = 0
@@ -71,15 +76,11 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
                 details.append({"symbol": stock.symbol, "outcome": "skipped", "reason": "no signals (no ML signal, no synthesis, no analyst input)"})
                 continue
 
-            # Only act on meaningful signals (not hold-ish)
-            if abs(pkg.combined_score) < 0.10:
-                logger.info("%s: score %.3f too weak, skipping", stock.symbol, pkg.combined_score)
-                skipped += 1
-                details.append({"symbol": stock.symbol, "outcome": "skipped", "reason": f"score {pkg.combined_score:+.3f} too weak (threshold ±0.10)"})
-                continue
+            # Let Claude see ALL stocks with signals — it decides
+            # whether to act. No static score threshold.
 
-            # Claude decision synthesis
-            decision = await _claude_decision(db, pkg)
+            # Claude decision synthesis (with portfolio context)
+            decision = await _claude_decision(db, pkg, portfolio_ctx)
             if decision is None:
                 skipped += 1
                 details.append({"symbol": stock.symbol, "outcome": "skipped", "reason": "Claude decision failed"})
@@ -164,6 +165,61 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
 
 
 # ── Internal helpers ──────────────────────────────────────────────────
+
+
+async def _build_portfolio_context(
+    db: AsyncSession, risk_state: Any, portfolio_value: float
+) -> dict[str, Any]:
+    """Gather portfolio stats so Claude can dynamically adjust aggression."""
+    # Count open positions
+    pos_result = await db.execute(
+        select(func.count(PortfolioPosition.id)).where(PortfolioPosition.shares > 0)
+    )
+    open_positions = pos_result.scalar() or 0
+
+    # Latest snapshot for cash
+    snap_result = await db.execute(
+        select(PortfolioSnapshot).order_by(desc(PortfolioSnapshot.timestamp)).limit(1)
+    )
+    snap = snap_result.scalar_one_or_none()
+    cash = snap.cash if snap else portfolio_value
+
+    # Recent trade stats (last 30 filled trades)
+    trade_result = await db.execute(
+        select(Trade)
+        .where(Trade.status == "filled")
+        .order_by(desc(Trade.fill_time))
+        .limit(30)
+    )
+    recent_trades = trade_result.scalars().all()
+
+    win_rate = 0.0
+    total_recent_trades = 0
+    if recent_trades:
+        # Simple win count: buy trades where we later sold higher
+        # For quick context, just count total filled trades
+        total_recent_trades = len(recent_trades)
+
+    # Drawdown from peak
+    drawdown_pct = 0.0
+    if portfolio_value > 0 and risk_state.portfolio_peak_value > 0:
+        drawdown_pct = (
+            (risk_state.portfolio_peak_value - portfolio_value)
+            / risk_state.portfolio_peak_value
+        ) * 100
+
+    return {
+        "portfolio_value": portfolio_value,
+        "cash": cash,
+        "cash_pct": (cash / portfolio_value * 100) if portfolio_value > 0 else 100,
+        "open_positions": open_positions,
+        "recent_trade_count": total_recent_trades,
+        "daily_realized_loss": risk_state.daily_realized_loss,
+        "daily_loss_limit": risk_state.daily_loss_limit,
+        "drawdown_from_peak_pct": drawdown_pct,
+        "max_drawdown_pct": risk_state.max_drawdown_pct,
+        "portfolio_peak": risk_state.portfolio_peak_value,
+    }
 
 
 async def _get_watchlist(db: AsyncSession) -> list[Stock]:
@@ -319,7 +375,7 @@ def _compute_weighted_score(
 
 
 async def _claude_decision(
-    db: AsyncSession, pkg: SignalPackage
+    db: AsyncSession, pkg: SignalPackage, portfolio_ctx: dict[str, Any] | None = None
 ) -> dict[str, Any] | None:
     """Ask Claude for final decision synthesis on the signal package."""
     sections = [
@@ -329,6 +385,21 @@ async def _claude_decision(
         f"Combined Score: {pkg.combined_score:+.3f} (scale: -1 sell to +1 buy)",
         f"Combined Confidence: {pkg.combined_confidence:.3f}",
     ]
+
+    # Portfolio context — lets Claude dynamically adjust aggression
+    if portfolio_ctx:
+        ctx = portfolio_ctx
+        sections.append(
+            f"\n## Portfolio Context\n"
+            f"Portfolio Value: ${ctx['portfolio_value']:,.2f} | "
+            f"Cash: ${ctx['cash']:,.2f} ({ctx['cash_pct']:.1f}%)\n"
+            f"Open Positions: {ctx['open_positions']} | "
+            f"Recent Trades (30d): {ctx['recent_trade_count']}\n"
+            f"Drawdown from Peak: {ctx['drawdown_from_peak_pct']:.1f}% "
+            f"(halt at {ctx['max_drawdown_pct']:.1f}%)\n"
+            f"Daily Realized Loss: ${ctx['daily_realized_loss']:.2f} "
+            f"(limit: ${ctx['daily_loss_limit']:.2f})"
+        )
 
     if pkg.current_position and pkg.current_position.shares > 0:
         pos = pkg.current_position
