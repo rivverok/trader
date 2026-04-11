@@ -507,6 +507,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ symbols, years }),
       }),
+    generateSignals: () =>
+      fetchApi<{ task_id: string }>("/models/generate-signals", {
+        method: "POST",
+      }),
     backtestResults: (limit = 20) =>
       fetchApi<BacktestResultItem[]>(`/backtest/results?limit=${limit}`),
     runBacktest: (params: {

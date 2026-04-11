@@ -188,6 +188,13 @@ async def trigger_retrain(body: RetrainRequest):
     return {"task_id": str(result.id), "status": "queued"}
 
 
+@router.post("/models/generate-signals")
+async def trigger_generate_signals():
+    """Trigger ML signal generation for all watchlist stocks."""
+    result = generate_ml_signals.delay()
+    return {"task_id": str(result.id), "status": "queued"}
+
+
 # ── Backtest endpoints ───────────────────────────────────────────────
 
 

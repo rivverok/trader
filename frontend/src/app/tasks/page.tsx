@@ -651,6 +651,7 @@ export default function TasksPage() {
               { label: "News Sentiment", desc: "Claude AI scores unanalyzed news articles for sentiment", action: () => api.analysis.trigger("sentiment") },
               { label: "Filing Analysis", desc: "Claude AI analyzes SEC filings for risks and opportunities", action: () => api.analysis.trigger("filings") },
               { label: "Context Synthesis", desc: "Claude AI creates holistic per-stock analysis from all data sources", action: () => api.analysis.trigger("synthesis") },
+              { label: "ML Signals", desc: "Run ML model to generate buy/sell/hold predictions for all watchlist stocks", action: () => api.ml.generateSignals() },
               { label: "Retrain ML", desc: "Retrain XGBoost/LightGBM models on latest price and feature data", action: () => api.ml.retrain() },
             ].map((t) => (
               <div key={t.label} className="flex items-center justify-between rounded-lg border p-3">
