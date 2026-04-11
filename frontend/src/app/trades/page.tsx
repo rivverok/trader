@@ -222,6 +222,20 @@ export default function TradesPage() {
                 {label}
               </Button>
             ))}
+            <div className="ml-auto">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  try {
+                    await api.trades.reevaluateRejected();
+                    setTimeout(() => loadData(), 3000);
+                  } catch { /* empty */ }
+                }}
+              >
+                Re-evaluate Rejected
+              </Button>
+            </div>
           </div>
 
           <Card>

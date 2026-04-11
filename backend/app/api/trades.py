@@ -22,6 +22,14 @@ async def trigger_decision_cycle():
     return {"task_id": str(result.id), "status": "queued"}
 
 
+@router.post("/reevaluate-rejected")
+async def trigger_reevaluate_rejected():
+    """Re-run risk checks on all rejected proposals from last 48h."""
+    from app.tasks.execution_tasks import reevaluate_rejected_proposals_task
+    result = reevaluate_rejected_proposals_task.delay(force=True)
+    return {"task_id": str(result.id), "status": "queued"}
+
+
 # ── Schemas ──────────────────────────────────────────────────────────
 
 

@@ -1,15 +1,18 @@
 """Execution engine Celery tasks — execute trades, sync portfolio, monitor stops."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from celery import shared_task
-from sqlalchemy import select
+from sqlalchemy import desc, select
 
 from app.database import async_session
 from app.engine.executor import execute_trade, sync_order_status
 from app.engine.portfolio_sync import sync_portfolio
-from app.engine.risk_manager import get_risk_state, record_realized_loss
+from app.engine.risk_manager import check_trade_allowed, get_risk_state, record_realized_loss
+from app.models.portfolio import PortfolioPosition, PortfolioSnapshot
+from app.models.price import Price
+from app.models.stock import Stock
 from app.models.trade import ProposedTrade, Trade
 
 logger = logging.getLogger(__name__)
@@ -187,3 +190,95 @@ async def _auto_execute_proposals():
             logger.info("Auto-approved %d proposals", approved_count)
 
         return {"status": "ok", "approved": approved_count}
+
+
+@shared_task(name="reevaluate_rejected_proposals")
+def reevaluate_rejected_proposals_task(force=False):
+    """Re-check rejected proposals — promote to 'proposed' if they now pass risk.
+
+    Runs at market open. Catches proposals blocked by transient conditions
+    (market closed, daily loss limit that reset, etc.).
+    """
+    from app.tasks.task_status import update_task_status, is_system_paused
+    if not force and is_system_paused():
+        return {"status": "system_paused"}
+    result = _run_async(_reevaluate_rejected_proposals())
+    update_task_status("reevaluate_rejected_proposals", result)
+    return result
+
+
+async def _reevaluate_rejected_proposals():
+    async with async_session() as db:
+        state = await get_risk_state(db)
+        if state.trading_halted:
+            return {"status": "halted", "promoted": 0}
+
+        # Get portfolio value for risk checks
+        snap_result = await db.execute(
+            select(PortfolioSnapshot).order_by(desc(PortfolioSnapshot.timestamp)).limit(1)
+        )
+        snap = snap_result.scalar_one_or_none()
+        portfolio_value = snap.total_value if snap else state.max_trade_dollars * 100
+
+        # Find rejected proposals from the last 48 hours
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+        result = await db.execute(
+            select(ProposedTrade, Stock)
+            .join(Stock, Stock.id == ProposedTrade.stock_id)
+            .where(
+                ProposedTrade.status == "rejected",
+                ProposedTrade.created_at >= cutoff,
+            )
+            .order_by(ProposedTrade.created_at)
+        )
+        rejected = result.all()
+
+        if not rejected:
+            return {"status": "ok", "promoted": 0, "still_blocked": 0}
+
+        promoted = 0
+        still_blocked = 0
+        for proposed, stock in rejected:
+            # Use price_target if set (limit orders), otherwise look up latest price
+            price = proposed.price_target
+            if not price or price <= 0:
+                price_result = await db.execute(
+                    select(Price.close)
+                    .where(Price.stock_id == stock.id)
+                    .order_by(desc(Price.timestamp))
+                    .limit(1)
+                )
+                price = price_result.scalar() or 0.0
+
+            if price <= 0:
+                still_blocked += 1
+                continue
+
+            allowed, reason = await check_trade_allowed(
+                db=db,
+                stock=stock,
+                action=proposed.action,
+                shares=proposed.shares,
+                price=price,
+                confidence=proposed.confidence,
+                portfolio_value=portfolio_value,
+            )
+            if allowed:
+                proposed.status = "proposed"
+                proposed.risk_check_passed = True
+                proposed.risk_check_reason = "ok (re-evaluated)"
+                proposed.updated_at = datetime.now(timezone.utc)
+                promoted += 1
+                logger.info(
+                    "Promoted rejected proposal #%d (%s %s) — was: %s",
+                    proposed.id, proposed.action, stock.symbol,
+                    proposed.risk_check_reason,
+                )
+            else:
+                still_blocked += 1
+
+        if promoted > 0:
+            await db.commit()
+        logger.info("Re-evaluated %d rejected: %d promoted, %d still blocked",
+                     len(rejected), promoted, still_blocked)
+        return {"status": "ok", "promoted": promoted, "still_blocked": still_blocked}

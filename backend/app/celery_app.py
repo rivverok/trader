@@ -65,6 +65,10 @@ def _get_default_schedule() -> dict:
             "task": "auto_execute_proposals",
             "schedule": crontab(minute="*", hour="9-16", day_of_week="mon-fri"),
         },
+        "reevaluate-rejected-proposals": {
+            "task": "reevaluate_rejected_proposals",
+            "schedule": crontab(minute=30, hour=9, day_of_week="mon-fri"),
+        },
         "sync-portfolio": {
             "task": "sync_portfolio",
             "schedule": crontab(minute="*/5", hour="9-16", day_of_week="mon-fri"),
