@@ -72,10 +72,10 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
                 continue
 
             # Only act on meaningful signals (not hold-ish)
-            if abs(pkg.combined_score) < 0.15:
+            if abs(pkg.combined_score) < 0.10:
                 logger.info("%s: score %.3f too weak, skipping", stock.symbol, pkg.combined_score)
                 skipped += 1
-                details.append({"symbol": stock.symbol, "outcome": "skipped", "reason": f"score {pkg.combined_score:+.3f} too weak (threshold ±0.15)"})
+                details.append({"symbol": stock.symbol, "outcome": "skipped", "reason": f"score {pkg.combined_score:+.3f} too weak (threshold ±0.10)"})
                 continue
 
             # Claude decision synthesis
@@ -281,8 +281,11 @@ def _compute_weighted_score(
 
     if ml_signal:
         ml_score = {"buy": 1.0, "sell": -1.0, "hold": 0.0}.get(ml_signal.signal, 0.0)
-        score += w_ml * ml_score * ml_signal.confidence
-        total_weight += w_ml
+        if ml_score != 0.0:
+            # Only count ML weight when it has a directional opinion.
+            # "hold" means no opinion — don't let it dilute other signals.
+            score += w_ml * ml_score * ml_signal.confidence
+            total_weight += w_ml
         conf_parts.append(ml_signal.confidence)
 
     if synthesis:
