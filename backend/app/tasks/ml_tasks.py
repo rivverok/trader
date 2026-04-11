@@ -27,8 +27,10 @@ def get_ml_status() -> dict[str, dict[str, Any]]:
 
 
 def _run_async(coro):
-    loop = asyncio.new_event_loop()
+    from app.database import engine
+    asyncio.get_event_loop_policy().set_event_loop(loop := asyncio.new_event_loop())
     try:
+        loop.run_until_complete(engine.dispose())
         return loop.run_until_complete(coro)
     finally:
         loop.close()
@@ -89,7 +91,19 @@ def retrain_model(self, symbols: list[str] | None = None, years: int = 5):
         from training.train_technical_model import load_from_database, run_training
 
         df = load_from_database(symbols, years)
-        report = run_training(df)
+
+        def _progress_cb(symbol, sym_idx, total_symbols, fold_idx, total_folds, best_score, best_model_type):
+            self.update_state(state="PROGRESS", meta={
+                "current_symbol": symbol,
+                "symbol_index": sym_idx + 1,
+                "total_symbols": total_symbols,
+                "fold_index": fold_idx + 1,
+                "total_folds": total_folds,
+                "best_score": round(best_score, 4) if best_score > 0 else None,
+                "best_model_type": best_model_type or None,
+            })
+
+        report = run_training(df, progress_callback=_progress_cb)
 
         # Register the new model in the database
         # Auto-promote only if it outperforms the current active model
@@ -267,4 +281,77 @@ def run_backtest_task(
     except Exception as exc:
         _update_status("run_backtest", {"status": "error", "error": str(exc)})
         logger.error("run_backtest failed: %s", exc)
+        raise
+
+
+# ── Model staleness check ───────────────────────────────────────────
+
+@celery_app.task(name="check_model_staleness", max_retries=0)
+def check_model_staleness():
+    """Check if the active ML model is stale and create an alert if so."""
+    import os
+    from datetime import timedelta
+
+    stale_days = int(os.environ.get("MODEL_STALE_DAYS", "14"))
+
+    try:
+        from app.models.ml import ModelRegistry
+        from app.models.alert import Alert
+        from sqlalchemy import select, desc, func
+
+        async def _check():
+            async with async_session() as session:
+                # Get active model
+                result = await session.execute(
+                    select(ModelRegistry)
+                    .where(ModelRegistry.is_active.is_(True))
+                    .order_by(desc(ModelRegistry.training_date))
+                    .limit(1)
+                )
+                active = result.scalar_one_or_none()
+
+                if active is None:
+                    age_days = None
+                    is_stale = True
+                    message = "No active ML model found. Run remote training to create one."
+                else:
+                    age = datetime.now(timezone.utc) - active.training_date.replace(
+                        tzinfo=timezone.utc
+                    )
+                    age_days = age.days
+                    is_stale = age_days > stale_days
+                    if not is_stale:
+                        return {"status": "ok", "age_days": age_days, "stale": False}
+                    message = (
+                        f"ML model is {age_days} days old (threshold: {stale_days}). "
+                        f"Run remote training to update."
+                    )
+
+                # Check if we already fired a model_stale alert in the last 24h
+                cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+                recent = await session.execute(
+                    select(func.count())
+                    .select_from(Alert)
+                    .where(
+                        Alert.type == "model_stale",
+                        Alert.created_at >= cutoff_24h,
+                    )
+                )
+                if recent.scalar() > 0:
+                    return {"status": "already_alerted", "stale": True, "age_days": age_days}
+
+                # Create alert
+                from app.engine.alert_service import create_alert
+                await create_alert(session, "model_stale", message, severity="warning")
+
+                return {"status": "alerted", "stale": True, "age_days": age_days}
+
+        result = _run_async(_check())
+        _update_status("check_model_staleness", result)
+        logger.info("check_model_staleness: %s", result)
+        return result
+
+    except Exception as exc:
+        _update_status("check_model_staleness", {"status": "error", "error": str(exc)})
+        logger.error("check_model_staleness failed: %s", exc)
         raise

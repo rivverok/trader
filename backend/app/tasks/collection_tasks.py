@@ -29,8 +29,11 @@ def get_collection_status() -> dict[str, dict[str, Any]]:
 
 def _run_async(coro):
     """Run an async coroutine from a sync Celery task."""
-    loop = asyncio.new_event_loop()
+    from app.database import engine
+    # Dispose stale connection pool from parent process / previous event loop
+    asyncio.get_event_loop_policy().set_event_loop(loop := asyncio.new_event_loop())
     try:
+        loop.run_until_complete(engine.dispose())
         return loop.run_until_complete(coro)
     finally:
         loop.close()

@@ -28,7 +28,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://riv-ubuntu",
+        "https://riv-ubuntu",
+        "http://riv-ubuntu:5000",
+        "http://localhost:5000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,6 +53,8 @@ from app.api.system import router as system_router
 from app.api.analytics import router as analytics_router
 from app.api.alerts import router as alerts_router
 from app.api.discovery import router as discovery_router
+from app.api.status import router as status_router
+from app.api.tasks import router as tasks_router
 
 app.include_router(stocks_router)
 app.include_router(economic_router)
@@ -62,6 +69,8 @@ app.include_router(system_router)
 app.include_router(analytics_router)
 app.include_router(alerts_router)
 app.include_router(discovery_router)
+app.include_router(status_router)
+app.include_router(tasks_router)
 
 
 @app.get("/api/health")

@@ -21,8 +21,12 @@ def get_discovery_status() -> dict[str, Any]:
 
 
 def _run_async(coro):
-    loop = asyncio.new_event_loop()
+    from app.database import engine
+    # Dispose stale connection pool from parent process / previous event loop
+    # so the new loop gets fresh connections.
+    asyncio.get_event_loop_policy().set_event_loop(loop := asyncio.new_event_loop())
     try:
+        loop.run_until_complete(engine.dispose())
         return loop.run_until_complete(coro)
     finally:
         loop.close()

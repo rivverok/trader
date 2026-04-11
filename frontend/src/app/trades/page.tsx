@@ -103,6 +103,15 @@ export default function TradesPage() {
     }
   }
 
+  async function handleReevaluate(id: number) {
+    try {
+      await api.trades.reevaluate(id);
+      await loadData();
+    } catch {
+      /* empty */
+    }
+  }
+
   if (loading && trades.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -279,6 +288,15 @@ export default function TradesPage() {
                                 Reject
                               </Button>
                             </>
+                          )}
+                          {t.status === "rejected" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleReevaluate(t.id)}
+                            >
+                              Re-evaluate
+                            </Button>
                           )}
                           <Button
                             variant="ghost"

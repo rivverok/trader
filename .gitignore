@@ -41,3 +41,4 @@ logs/
 data/
 *.csv
 *.parquet
+/backups

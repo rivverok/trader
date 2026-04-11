@@ -56,7 +56,117 @@ class FinnhubCollector(BaseCollector):
                 "name": data.get("name", ""),
                 "sector": data.get("finnhubIndustry", ""),
                 "exchange": data.get("exchange", ""),
+                "market_cap": data.get("marketCapitalization", 0),
+                "country": data.get("country", ""),
             }
+
+    async def fetch_quote(self, symbol: str) -> dict[str, Any]:
+        """Fetch real-time quote for a symbol."""
+        async with self._build_client() as client:
+            resp = await self._request_with_retry(
+                client, "GET",
+                f"{self.base_url}/quote",
+                params={"symbol": symbol.upper(), "token": self.api_key},
+            )
+            data = resp.json()
+            return {
+                "current_price": data.get("c", 0),
+                "change": data.get("d", 0),
+                "percent_change": data.get("dp", 0),
+                "high": data.get("h", 0),
+                "low": data.get("l", 0),
+                "open": data.get("o", 0),
+                "prev_close": data.get("pc", 0),
+            }
+
+    async def fetch_recommendations(self, symbol: str) -> list[dict]:
+        """Fetch analyst recommendation trends for a symbol."""
+        async with self._build_client() as client:
+            resp = await self._request_with_retry(
+                client, "GET",
+                f"{self.base_url}/stock/recommendation",
+                params={"symbol": symbol.upper(), "token": self.api_key},
+            )
+            data = resp.json()
+            if not isinstance(data, list):
+                return []
+            return data[:3]  # Latest 3 months
+
+    async def fetch_basic_financials(self, symbol: str) -> dict[str, Any]:
+        """Fetch basic financial metrics (PE, PB, beta, margins, etc.)."""
+        async with self._build_client() as client:
+            resp = await self._request_with_retry(
+                client, "GET",
+                f"{self.base_url}/stock/metric",
+                params={"symbol": symbol.upper(), "metric": "all", "token": self.api_key},
+            )
+            data = resp.json()
+            metrics = data.get("metric", {})
+            return {
+                "pe_ratio": metrics.get("peBasicExclExtraTTM"),
+                "pb_ratio": metrics.get("pbQuarterly"),
+                "beta": metrics.get("beta"),
+                "52_week_high": metrics.get("52WeekHigh"),
+                "52_week_low": metrics.get("52WeekLow"),
+                "52_week_return": metrics.get("52WeekPriceReturnDaily"),
+                "avg_volume_10d": metrics.get("10DayAverageTradingVolume"),
+                "market_cap": metrics.get("marketCapitalization"),
+                "dividend_yield": metrics.get("dividendYieldIndicatedAnnual"),
+                "rsi_14d": metrics.get("14DayRSI"),
+                "net_margin": metrics.get("netProfitMarginTTM"),
+                "roe": metrics.get("roeTTM"),
+            }
+
+    async def fetch_insider_transactions(self, symbol: str) -> list[dict]:
+        """Fetch recent insider transactions for a symbol."""
+        async with self._build_client() as client:
+            resp = await self._request_with_retry(
+                client, "GET",
+                f"{self.base_url}/stock/insider-transactions",
+                params={"symbol": symbol.upper(), "token": self.api_key},
+            )
+            data = resp.json()
+            transactions = data.get("data", [])
+            return transactions[:10]  # Latest 10 transactions
+
+    async def fetch_peers(self, symbol: str) -> list[str]:
+        """Fetch company peers (same sector/industry)."""
+        async with self._build_client() as client:
+            resp = await self._request_with_retry(
+                client, "GET",
+                f"{self.base_url}/stock/peers",
+                params={"symbol": symbol.upper(), "token": self.api_key},
+            )
+            data = resp.json()
+            if not isinstance(data, list):
+                return []
+            return data[:10]
+
+    async def fetch_earnings_calendar(
+        self, from_date: str, to_date: str
+    ) -> list[dict]:
+        """Fetch upcoming earnings calendar (bulk — all stocks in date range)."""
+        async with self._build_client() as client:
+            resp = await self._request_with_retry(
+                client, "GET",
+                f"{self.base_url}/calendar/earnings",
+                params={"from": from_date, "to": to_date, "token": self.api_key},
+            )
+            data = resp.json()
+            return data.get("earningsCalendar", [])
+
+    async def fetch_us_stock_symbols(self) -> list[dict]:
+        """Fetch all US stock symbols (bulk — one API call)."""
+        async with self._build_client() as client:
+            resp = await self._request_with_retry(
+                client, "GET",
+                f"{self.base_url}/stock/symbol",
+                params={"exchange": "US", "token": self.api_key},
+            )
+            data = resp.json()
+            if not isinstance(data, list):
+                return []
+            return data
 
     # ── Internal helpers ──────────────────────────────────────────────
 

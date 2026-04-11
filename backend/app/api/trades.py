@@ -111,6 +111,62 @@ async def reject_trade(
     return {"status": "rejected", "trade_id": trade_id}
 
 
+@router.post("/{trade_id}/reevaluate")
+async def reevaluate_trade(
+    trade_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-evaluate a rejected trade by running risk checks again with current state."""
+    from app.engine.risk_manager import check_trade_allowed
+    from app.models.stock import Stock
+
+    result = await db.execute(
+        select(ProposedTrade, Stock)
+        .join(Stock, Stock.id == ProposedTrade.stock_id)
+        .where(ProposedTrade.id == trade_id)
+    )
+    row = result.one_or_none()
+    if not row:
+        raise HTTPException(404, detail="Trade not found")
+    trade, stock = row
+
+    if trade.status == "executed":
+        raise HTTPException(400, detail="Trade already executed")
+
+    # Get current portfolio value for risk check
+    from app.models.portfolio import PortfolioSnapshot
+    snap = await db.execute(
+        select(PortfolioSnapshot)
+        .order_by(desc(PortfolioSnapshot.id))
+        .limit(1)
+    )
+    snapshot = snap.scalar_one_or_none()
+    portfolio_value = snapshot.total_value if snapshot else 1000.0
+
+    allowed, reason = await check_trade_allowed(
+        db=db,
+        stock=stock,
+        action=trade.action,
+        shares=trade.shares,
+        price=trade.price_target or 0,
+        confidence=trade.confidence,
+        portfolio_value=portfolio_value,
+    )
+
+    trade.risk_check_passed = allowed
+    trade.risk_check_reason = reason
+    trade.status = "proposed" if allowed else "rejected"
+    trade.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {
+        "trade_id": trade_id,
+        "status": trade.status,
+        "risk_check_passed": allowed,
+        "risk_check_reason": reason,
+    }
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 

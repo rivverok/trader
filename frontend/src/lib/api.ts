@@ -365,6 +365,82 @@ export interface DiscoveryStatus {
   last_result: Record<string, unknown>;
 }
 
+export interface ServiceCheck {
+  name: string;
+  status: "ok" | "error" | "not_configured";
+  message: string;
+  details: Record<string, unknown> | null;
+}
+
+export interface ServiceStatusResponse {
+  overall: string;
+  services: ServiceCheck[];
+}
+
+// ── Task management types ───────────────────────────────────────────
+export interface ActiveTask {
+  task_id: string;
+  name: string;
+  status: string;
+  worker: string;
+  started_at: string | null;
+  args: string | null;
+  kwargs: string | null;
+}
+
+export interface ScheduledTask {
+  key: string;
+  name: string;
+  schedule: string;
+  enabled: boolean;
+  last_run: string | null;
+  total_run_count: number | null;
+}
+
+export interface TaskListResponse {
+  active: ActiveTask[];
+  reserved: ActiveTask[];
+  scheduled_periodic: ScheduledTask[];
+}
+
+export interface TaskInfo {
+  task_id: string;
+  name: string | null;
+  status: string;
+  result: string | null;
+  error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  worker: string | null;
+  progress: {
+    current_symbol?: string;
+    symbol_index?: number;
+    total_symbols?: number;
+    fold_index?: number;
+    total_folds?: number;
+    best_score?: number | null;
+    best_model_type?: string | null;
+  } | null;
+}
+
+export interface TaskActionResponse {
+  task_id: string;
+  action: string;
+  success: boolean;
+  message: string;
+}
+
+export interface DataSourceStatus {
+  name: string;
+  rows: number;
+  latest: string | null;
+  detail: string | null;
+}
+
+export interface DataStatusResponse {
+  sources: DataSourceStatus[];
+}
+
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -495,6 +571,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ reason: reason || "Manually rejected" }),
       }),
+    reevaluate: (id: number) =>
+      fetchApi<{ trade_id: number; status: string; risk_check_passed: boolean; risk_check_reason: string }>(
+        `/trades/${id}/reevaluate`,
+        { method: "POST" }
+      ),
   },
   risk: {
     status: () => fetchApi<RiskStatus>("/risk/status"),
@@ -605,5 +686,27 @@ export const api = {
         method: "POST",
       }),
     status: () => fetchApi<DiscoveryStatus>("/discovery/status"),
+  },
+  status: {
+    services: () => fetchApi<ServiceStatusResponse>("/status/services"),
+  },
+  tasks: {
+    list: () => fetchApi<TaskListResponse>("/tasks/"),
+    get: (taskId: string) => fetchApi<TaskInfo>(`/tasks/${taskId}`),
+    cancel: (taskId: string) =>
+      fetchApi<TaskActionResponse>(`/tasks/${taskId}/cancel`, { method: "POST" }),
+    retry: (taskId: string) =>
+      fetchApi<TaskActionResponse>(`/tasks/${taskId}/retry`, { method: "POST" }),
+    dataStatus: () => fetchApi<DataStatusResponse>("/tasks/data-status"),
+    updateSchedule: (taskKey: string, body: { enabled: boolean; interval_seconds?: number; crontab?: Record<string, string> }) =>
+      fetchApi<{ key: string; enabled: boolean; schedule: string; message: string }>(
+        `/tasks/schedules/${taskKey}`,
+        { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    resetSchedule: (taskKey: string) =>
+      fetchApi<{ key: string; enabled: boolean; schedule: string; message: string }>(
+        `/tasks/schedules/${taskKey}`,
+        { method: "DELETE" },
+      ),
   },
 };

@@ -26,8 +26,10 @@ def get_analysis_status() -> dict[str, dict[str, Any]]:
 
 
 def _run_async(coro):
-    loop = asyncio.new_event_loop()
+    from app.database import engine
+    asyncio.get_event_loop_policy().set_event_loop(loop := asyncio.new_event_loop())
     try:
+        loop.run_until_complete(engine.dispose())
         return loop.run_until_complete(coro)
     finally:
         loop.close()

@@ -13,6 +13,9 @@ import {
   BarChart3,
   Telescope,
   Eye,
+  Activity,
+  ListChecks,
+  Brain,
 } from "lucide-react";
 import { AlertBell } from "@/components/alert-bell";
 
@@ -24,8 +27,11 @@ const navItems = [
   { href: "/analyst", label: "Analyst", icon: PenLine },
   { href: "/trades", label: "Trades", icon: ArrowRightLeft },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/models", label: "Models", icon: Brain },
   { href: "/backtest", label: "Backtest", icon: FlaskConical },
+  { href: "/tasks", label: "Tasks", icon: ListChecks },
   { href: "/config", label: "Config", icon: Settings },
+  { href: "/status", label: "Status", icon: Activity },
 ];
 
 export function Sidebar() {

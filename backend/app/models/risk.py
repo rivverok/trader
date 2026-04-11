@@ -36,5 +36,5 @@ class RiskState(TimestampMixin, Base):
     halt_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     halted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     daily_realized_loss: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    portfolio_peak_value: Mapped[float] = mapped_column(Float, nullable=False, default=100000.0)
+    portfolio_peak_value: Mapped[float] = mapped_column(Float, nullable=False, default=1000.0)
     last_reset_date: Mapped[date | None] = mapped_column(Date, nullable=True)

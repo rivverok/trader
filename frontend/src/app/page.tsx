@@ -28,6 +28,7 @@ export default function DashboardPage() {
   const [collectionStatus, setCollectionStatus] = useState<CollectionStatus | null>(null);
   const [analyses, setAnalyses] = useState<Record<string, StockAnalysis>>({});
   const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
+  const [portfolioError, setPortfolioError] = useState(false);
   const [history, setHistory] = useState<PortfolioSnapshot[]>([]);
   const [recentTrades, setRecentTrades] = useState<ExecutedTradeItem[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
@@ -49,7 +50,10 @@ export default function DashboardPage() {
       ).then(() => setAnalyses(results));
     }).catch(() => {});
     api.collection.status().then(setCollectionStatus).catch(() => {});
-    api.portfolio.get().then(setPortfolio).catch(() => {});
+    api.portfolio.get().then(setPortfolio).catch(() => {
+      setPortfolioError(true);
+      setPortfolio({ total_value: 0, cash: 0, positions_value: 0, daily_pnl: 0, cumulative_pnl: 0, buying_power: 0, positions: [], account_status: "unavailable" });
+    });
     api.portfolio.history(30).then(setHistory).catch(() => {});
     api.portfolio.trades(undefined, 10).then(setRecentTrades).catch(() => {});
     api.system.status().then(setSystemStatus).catch(() => {});
@@ -91,7 +95,11 @@ export default function DashboardPage() {
             <CardDescription>Portfolio Value</CardDescription>
             <CardTitle className="text-2xl font-mono">
               {portfolio ? (
-                `$${portfolio.total_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                portfolioError ? (
+                  <span className="text-muted-foreground text-base">Not connected</span>
+                ) : (
+                  `$${portfolio.total_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                )
               ) : (
                 <span className="text-muted-foreground">Loading...</span>
               )}

@@ -67,6 +67,14 @@ export function AlertBell() {
     critical: "text-red-400",
   };
 
+  const alertTypeLabel: Record<string, string> = {
+    model_stale: "Model Stale",
+    model_retrained: "Model Retrained",
+    trade_executed: "Trade Executed",
+    circuit_breaker: "Circuit Breaker",
+    system_error: "System Error",
+  };
+
   return (
     <div className="relative" ref={ref}>
       <button
@@ -83,7 +91,7 @@ export function AlertBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-10 z-50 w-80 rounded-lg border bg-card shadow-lg">
+        <div className="absolute left-0 top-10 z-50 w-[28rem] rounded-lg border bg-card shadow-lg">
           <div className="flex items-center justify-between border-b px-4 py-2">
             <span className="text-sm font-semibold">Alerts</span>
             {unread > 0 && (
@@ -132,7 +140,7 @@ export function AlertBell() {
                         severityColor[a.severity] || "text-muted-foreground"
                       )}
                     >
-                      {a.type.replace(/_/g, " ")}
+                      {alertTypeLabel[a.type] || a.type.replace(/_/g, " ")}
                     </span>
                     <span className="text-xs text-muted-foreground ml-auto whitespace-nowrap">
                       {new Date(a.created_at).toLocaleTimeString()}

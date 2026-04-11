@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from app.celery_app import celery_app
-from app.database import async_session_factory
+from app.database import async_session
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,16 @@ _decision_status: dict[str, Any] = {
 
 def get_decision_status() -> dict[str, Any]:
     return dict(_decision_status)
+
+
+def _run_async(coro):
+    from app.database import engine
+    asyncio.get_event_loop_policy().set_event_loop(loop := asyncio.new_event_loop())
+    try:
+        loop.run_until_complete(engine.dispose())
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 @celery_app.task(name="run_decision_cycle", bind=True, max_retries=1)
@@ -32,18 +42,10 @@ def run_decision_cycle_task(self) -> dict:
     async def _run() -> dict:
         from app.engine.decision_engine import run_decision_cycle
 
-        async with async_session_factory() as db:
+        async with async_session() as db:
             return await run_decision_cycle(db)
 
-    try:
-        result = asyncio.get_event_loop().run_until_complete(_run())
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(_run())
-        finally:
-            loop.close()
+    result = _run_async(_run())
 
     _decision_status["last_run"] = datetime.now(timezone.utc).isoformat()
     _decision_status["last_result"] = result

@@ -1,7 +1,9 @@
-"""AI-driven stock discovery engine — uses Claude to find and curate watchlist stocks."""
+"""AI-driven stock discovery engine — multi-strategy screening with Claude analysis."""
 
+import asyncio
 import logging
-from datetime import datetime, timezone
+import random
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, func
@@ -19,26 +21,99 @@ logger = logging.getLogger(__name__)
 
 WATCHLIST_MIN = 5
 WATCHLIST_MAX = 20
+MAX_CANDIDATES_TO_ENRICH = 25  # Limit Finnhub API calls per run
+
+# ── Discovery preferences (override via settings) ────────────────────
+DISCOVERY_PRICE_MIN = getattr(settings, "DISCOVERY_PRICE_MIN", 5.0)
+DISCOVERY_PRICE_MAX = getattr(settings, "DISCOVERY_PRICE_MAX", 200.0)
+DISCOVERY_MCAP_MIN_M = getattr(settings, "DISCOVERY_MCAP_MIN_M", 300)     # $300M minimum
+DISCOVERY_MCAP_MAX_M = getattr(settings, "DISCOVERY_MCAP_MAX_M", 500000)  # $500B max (blocks only top ~10 companies)
+DISCOVERY_PREFER_SECTORS: list[str] = []  # Empty = all sectors
 
 
 async def run_stock_discovery(db: AsyncSession) -> dict[str, Any]:
-    """Run the AI stock discovery cycle.
+    """Run multi-strategy stock discovery cycle.
 
-    Gathers market context, consults Claude, and updates the watchlist.
-    Returns a summary of actions taken.
+    Strategies:
+    1. Market movers (gainers, losers, most-active) — momentum signals
+    2. Earnings catalysts — stocks reporting earnings soon
+    3. Peer expansion — peers of existing watchlist stocks
+    4. Sector scan — sample from under-represented sectors
+    Then: enrich top candidates + Claude analysis + add/remove decisions
     """
     batch_id = f"discovery_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
-    # ── 1. Gather context ────────────────────────────────────────────
+    # ── 1. Gather existing context ───────────────────────────────────
     economic_ctx = await _get_economic_context(db)
     watchlist_ctx = await _get_watchlist_context(db)
     portfolio_ctx = await _get_portfolio_context(db)
     hints = await _get_pending_hints(db)
     watchlist_count = watchlist_ctx["count"]
+    watchlist_symbols = {s["symbol"] for s in watchlist_ctx["stocks"]}
 
-    # ── 2. Build prompt and call Claude ─────────────────────────────
+    # ── 2. Multi-strategy screening ──────────────────────────────────
+    all_candidates: list[dict] = []
+    strategy_stats: dict[str, int] = {}
+
+    # Strategy A: Market movers (traditional — but limited allocation)
+    movers = await _screen_movers(watchlist_symbols)
+    all_candidates.extend(movers)
+    strategy_stats["movers"] = len(movers)
+
+    # Strategy B: Earnings catalysts
+    earnings = await _screen_earnings_catalysts(watchlist_symbols)
+    all_candidates.extend(earnings)
+    strategy_stats["earnings"] = len(earnings)
+
+    # Strategy C: Peer expansion from watchlist
+    if watchlist_symbols:
+        peers = await _screen_peers(watchlist_symbols)
+        all_candidates.extend(peers)
+        strategy_stats["peers"] = len(peers)
+
+    # Strategy D: Sector-diversified scan
+    watchlist_sectors = {s.get("sector", "") for s in watchlist_ctx["stocks"]} - {""}
+    sector_picks = await _screen_sector_diversified(watchlist_symbols, watchlist_sectors)
+    all_candidates.extend(sector_picks)
+    strategy_stats["sector_scan"] = len(sector_picks)
+
+    # Deduplicate by symbol within each strategy bucket
+    seen = set()
+    strategy_buckets: dict[str, list[dict]] = {}
+    for c in all_candidates:
+        sym = c["symbol"]
+        if sym not in seen:
+            seen.add(sym)
+            strat = c.get("strategy", "unknown").split("_")[0]  # Group mover_gainer + mover_loser
+            strategy_buckets.setdefault(strat, []).append(c)
+
+    # Round-robin interleave from each strategy for fair representation
+    unique_candidates: list[dict] = []
+    bucket_iters = {k: iter(v) for k, v in strategy_buckets.items()}
+    while bucket_iters and len(unique_candidates) < MAX_CANDIDATES_TO_ENRICH * 2:
+        exhausted = []
+        for strat, it in bucket_iters.items():
+            try:
+                unique_candidates.append(next(it))
+            except StopIteration:
+                exhausted.append(strat)
+        for s in exhausted:
+            del bucket_iters[s]
+
+    logger.info(
+        "Multi-strategy screening: %s → %d unique candidates (interleaved)",
+        strategy_stats, len(unique_candidates),
+    )
+
+    # ── 3. Enrich top candidates with fundamentals ───────────────────
+    candidates = unique_candidates[:MAX_CANDIDATES_TO_ENRICH]
+    enriched = await _enrich_candidates(candidates)
+    logger.info("Enriched %d candidates with fundamental data", len(enriched))
+
+    # ── 4. Build prompt and call Claude ──────────────────────────────
     user_message = _build_user_message(
         economic_ctx, watchlist_ctx, portfolio_ctx, hints, watchlist_count,
+        strategy_stats, enriched,
     )
     system_prompt = load_prompt("discovery")
 
@@ -53,7 +128,7 @@ async def run_stock_discovery(db: AsyncSession) -> dict[str, Any]:
         logger.error("Discovery Claude call failed: %s", e)
         return {"status": "error", "error": str(e)}
 
-    # ── 3. Process ADD recommendations ──────────────────────────────
+    # ── 5. Process ADD recommendations ───────────────────────────────
     added = []
     for rec in result.get("add", []):
         symbol = rec.get("symbol", "").upper().strip()
@@ -66,7 +141,7 @@ async def run_stock_discovery(db: AsyncSession) -> dict[str, Any]:
         if success:
             added.append(symbol)
 
-    # ── 4. Process REMOVE recommendations ───────────────────────────
+    # ── 6. Process REMOVE recommendations ────────────────────────────
     removed = []
     held_symbols = {p["symbol"] for p in portfolio_ctx}
     for rec in result.get("remove", []):
@@ -75,7 +150,6 @@ async def run_stock_discovery(db: AsyncSession) -> dict[str, Any]:
             continue
         if symbol in held_symbols:
             logger.info("Skipping removal of %s — currently held in portfolio", symbol)
-            # Log it anyway so the user can see the AI's reasoning
             log = DiscoveryLog(
                 batch_id=batch_id, action="keep", symbol=symbol,
                 reasoning=f"AI recommended removal but stock is held in portfolio: {rec.get('reasoning', '')}",
@@ -89,13 +163,13 @@ async def run_stock_discovery(db: AsyncSession) -> dict[str, Any]:
         if success:
             removed.append(symbol)
 
-    # ── 5. Process hint responses ───────────────────────────────────
+    # ── 7. Process hint responses ────────────────────────────────────
     hint_responses = result.get("hint_responses", {})
     await _mark_hints_processed(db, hints, hint_responses)
 
     await db.commit()
 
-    # ── 6. Fire alert ───────────────────────────────────────────────
+    # ── 8. Fire alert ────────────────────────────────────────────────
     try:
         from app.engine.alert_service import create_alert
         msg_parts = []
@@ -107,16 +181,18 @@ async def run_stock_discovery(db: AsyncSession) -> dict[str, Any]:
             msg_parts.append("No changes — watchlist is well-balanced")
         summary = "; ".join(msg_parts)
         assessment = result.get("market_assessment", "")
+        total_screened = sum(strategy_stats.values())
         await create_alert(
             db, "stock_discovery",
-            f"Watchlist discovery complete. {summary}. Market: {assessment[:200]}",
+            f"Discovery complete ({total_screened} screened via {len(strategy_stats)} strategies). {summary}. Market: {assessment[:200]}",
             severity="info",
         )
     except Exception:
         pass
 
     logger.info(
-        "Discovery complete: added=%s removed=%s batch=%s",
+        "Discovery complete: strategies=%s enriched=%d added=%s removed=%s batch=%s",
+        strategy_stats, len(enriched),
         added, removed, batch_id,
     )
     return {
@@ -124,9 +200,277 @@ async def run_stock_discovery(db: AsyncSession) -> dict[str, Any]:
         "batch_id": batch_id,
         "added": added,
         "removed": removed,
+        "strategies": strategy_stats,
+        "enriched": len(enriched),
         "market_assessment": result.get("market_assessment", ""),
         "watchlist_health": result.get("watchlist_health", ""),
     }
+
+
+# ── Screening strategies ──────────────────────────────────────────────
+
+
+def _is_common_stock(sym: str) -> bool:
+    """Filter out warrants, rights, units, and other derivative symbols."""
+    if not sym or not sym.isascii():
+        return False
+    upper = sym.upper()
+    for suffix in ("W", "WS", "R", "RT", "U"):
+        if upper.endswith(suffix) and len(upper) > len(suffix) + 1:
+            return False
+    if len(sym) > 5 or not sym.isalpha():
+        return False
+    return True
+
+
+async def _screen_movers(watchlist_symbols: set[str]) -> list[dict]:
+    """Strategy A: Market movers — gainers, losers, most-active from Alpaca."""
+    from app.collectors.alpaca_collector import AlpacaCollector
+
+    alpaca = AlpacaCollector()
+    candidates = []
+    seen = set()
+
+    try:
+        movers_data = await alpaca.fetch_movers(top=20)
+        for item in movers_data.get("gainers", []):
+            sym = item.get("symbol", "")
+            price = item.get("price", 0) or 0
+            if sym and sym not in seen and sym not in watchlist_symbols and _is_common_stock(sym) and price >= DISCOVERY_PRICE_MIN:
+                seen.add(sym)
+                candidates.append({
+                    "symbol": sym,
+                    "strategy": "mover_gainer",
+                    "percent_change": item.get("percent_change", 0),
+                    "price": price,
+                    "volume": item.get("trade_count", 0),
+                })
+        for item in movers_data.get("losers", []):
+            sym = item.get("symbol", "")
+            price = item.get("price", 0) or 0
+            if sym and sym not in seen and sym not in watchlist_symbols and _is_common_stock(sym) and price >= DISCOVERY_PRICE_MIN:
+                seen.add(sym)
+                candidates.append({
+                    "symbol": sym,
+                    "strategy": "mover_loser",
+                    "percent_change": item.get("percent_change", 0),
+                    "price": item.get("price", 0),
+                    "volume": item.get("trade_count", 0),
+                })
+    except Exception as e:
+        logger.warning("Movers screening failed: %s", e)
+
+    try:
+        active_data = await alpaca.fetch_most_active(top=20)
+        for item in active_data:
+            sym = item.get("symbol", "")
+            if sym and sym not in seen and sym not in watchlist_symbols and _is_common_stock(sym):
+                seen.add(sym)
+                candidates.append({
+                    "symbol": sym,
+                    "strategy": "most_active",
+                    "volume": item.get("volume", 0),
+                    "trade_count": item.get("trade_count", 0),
+                })
+    except Exception as e:
+        logger.warning("Most-active screening failed: %s", e)
+
+    return candidates
+
+
+async def _screen_earnings_catalysts(watchlist_symbols: set[str]) -> list[dict]:
+    """Strategy B: Stocks with upcoming earnings — catalyst-driven discovery."""
+    from app.collectors.finnhub_collector import FinnhubCollector
+
+    finnhub = FinnhubCollector()
+    candidates = []
+
+    try:
+        today = datetime.now(timezone.utc).date()
+        from_date = today.isoformat()
+        to_date = (today + timedelta(days=14)).isoformat()
+
+        earnings = await finnhub.fetch_earnings_calendar(from_date, to_date)
+        logger.info("Earnings calendar returned %d entries", len(earnings))
+
+        # Filter to US common stocks with estimates (indicates analyst coverage)
+        for entry in earnings:
+            sym = entry.get("symbol", "")
+            if not sym or sym in watchlist_symbols or not _is_common_stock(sym):
+                continue
+            # Prefer stocks with analyst estimates (indicates coverage/interest)
+            eps_est = entry.get("epsEstimate")
+            rev_est = entry.get("revenueEstimate")
+            if eps_est is None and rev_est is None:
+                continue  # Skip if no analyst coverage
+
+            candidates.append({
+                "symbol": sym,
+                "strategy": "earnings_catalyst",
+                "earnings_date": entry.get("date", ""),
+                "eps_estimate": eps_est,
+                "revenue_estimate": rev_est,
+                "hour": entry.get("hour", ""),  # bmo=before market, amc=after close
+            })
+
+        # Shuffle and limit — earnings calendar can be huge
+        random.shuffle(candidates)
+        candidates = candidates[:15]
+
+    except Exception as e:
+        logger.warning("Earnings screening failed: %s", e)
+
+    return candidates
+
+
+async def _screen_peers(watchlist_symbols: set[str]) -> list[dict]:
+    """Strategy C: Peers of current watchlist stocks — related opportunities."""
+    from app.collectors.finnhub_collector import FinnhubCollector
+
+    finnhub = FinnhubCollector()
+    candidates = []
+    seen = set(watchlist_symbols)
+
+    # Pick up to 3 random watchlist stocks to find peers for
+    source_symbols = random.sample(
+        list(watchlist_symbols),
+        min(3, len(watchlist_symbols)),
+    )
+
+    for source in source_symbols:
+        try:
+            peers = await finnhub.fetch_peers(source)
+            for sym in peers:
+                if sym and sym not in seen and _is_common_stock(sym):
+                    seen.add(sym)
+                    candidates.append({
+                        "symbol": sym,
+                        "strategy": "peer_expansion",
+                        "peer_of": source,
+                    })
+        except Exception as e:
+            logger.debug("Peer lookup failed for %s: %s", source, e)
+
+    return candidates
+
+
+async def _screen_sector_diversified(
+    watchlist_symbols: set[str],
+    watchlist_sectors: set[str],
+) -> list[dict]:
+    """Strategy D: Sample from a curated mid-cap universe across sectors.
+
+    Uses a seed list of quality stocks (~200) spanning all major sectors.
+    Picks randomly from sectors NOT already on the watchlist.
+    """
+    # Curated universe: quality mid/large-cap stocks across sectors
+    # These are real, liquid, US-listed stocks with analyst coverage
+    SECTOR_UNIVERSE = {
+        "Technology": ["CRWD", "PANW", "FTNT", "ZS", "NET", "DDOG", "SNOW", "MDB", "HUBS", "TWLO",
+                       "OKTA", "ZEN", "BILL", "PCOR", "DOCN", "CFLT", "PATH", "ESTC", "GTLB", "BRZE"],
+        "Healthcare": ["VEEV", "DXCM", "ALGN", "HOLX", "PODD", "NVCR", "RARE", "SMMT", "AVTR", "AZTA",
+                       "ILMN", "RGEN", "BMRN", "EXAS", "HALO", "ALNY", "SRPT", "INCY", "NBIX", "MRNA"],
+        "Financials": ["COIN", "HOOD", "SOFI", "LPLA", "IBKR", "MKTX", "CBOE", "FDS", "MSCI", "NDAQ",
+                       "WEX", "PYPL", "SQ", "AFRM", "UPST", "FOUR", "PAYO", "RELY", "STNE", "TOST"],
+        "Industrials": ["AXON", "TDG", "BLDR", "WSC", "RBC", "GNRC", "PAYC", "TREX", "SITE", "FIX",
+                        "PRIM", "AAON", "WFRD", "BWXT", "KRATOS", "RKLB", "ASTS", "LUNR", "JOBY", "ACHR"],
+        "Consumer": ["DECK", "LULU", "BROS", "DPZ", "CMG", "CAVA", "SHAK", "WING", "ELF", "CELH",
+                     "MNST", "YETI", "CROX", "ON", "DUOL", "DKNG", "PENN", "CHWY", "WOOF", "FRPT"],
+        "Energy": ["FANG", "CTRA", "DINO", "TRGP", "AM", "AROC", "NEXT", "RUN", "ENPH", "SEDG",
+                   "NOVA", "SHLS", "ORA", "STEM", "PLUG", "FCEL", "BE", "CLNE", "CHPT", "BLNK"],
+        "REITs": ["INVH", "AMH", "REXR", "TRNO", "SUI", "ELS", "IIPR", "COLD", "STAG", "NNN",
+                  "EPRT", "KREF", "BRSP", "GLPI", "VICI", "ARES", "OWL", "STEP", "APO", "BX"],
+        "Materials": ["MP", "ALB", "LTHM", "CC", "AXTA", "RPM", "VMC", "MLM", "EXP", "ITE",
+                      "WOLF", "AEHR", "ACLS", "MKSI", "ENTG", "QLYS", "CYBR", "SMAR", "TENB", "VRNS"],
+        "Utilities": ["CEG", "VST", "NRG", "OGE", "PNW", "IDA", "AVA", "EVRG", "NWE", "ALE",
+                      "AES", "BEP", "CWEN", "NOVA", "RNW", "AQN", "SPWR", "ARRY", "MAXN", "CSIQ"],
+        "Telecom": ["TMUS", "LBRDA", "SIRI", "LUMN", "USM", "GSAT", "IRDM", "GILT", "SATS", "ASTS"],
+    }
+
+    candidates = []
+    available_sectors = list(SECTOR_UNIVERSE.keys())
+    random.shuffle(available_sectors)
+
+    for sector in available_sectors:
+        stocks = SECTOR_UNIVERSE[sector]
+        # Filter out stocks already on watchlist
+        available = [s for s in stocks if s not in watchlist_symbols]
+        if not available:
+            continue
+        # Pick 2-3 random stocks from this sector
+        picks = random.sample(available, min(3, len(available)))
+        for sym in picks:
+            candidates.append({
+                "symbol": sym,
+                "strategy": "sector_scan",
+                "sector_hint": sector,
+            })
+
+    return candidates
+
+
+async def _enrich_candidates(candidates: list[dict]) -> list[dict]:
+    """Enrich candidate stocks with fundamental data from Finnhub.
+
+    Applies price/market-cap filters to focus on the sweet spot.
+    """
+    from app.collectors.finnhub_collector import FinnhubCollector
+
+    finnhub = FinnhubCollector()
+    enriched = []
+
+    for candidate in candidates:
+        symbol = candidate["symbol"]
+        data = dict(candidate)
+
+        try:
+            profile = await finnhub.fetch_company_profile(symbol)
+            data["name"] = profile.get("name", "")
+            data["sector"] = profile.get("sector", "")
+            data["market_cap"] = profile.get("market_cap", 0)
+            data["country"] = profile.get("country", "")
+
+            # Skip if Finnhub has no profile (warrants, rights, etc.)
+            if not data["name"]:
+                logger.info("Enrichment skip %s: no profile", symbol)
+                continue
+            # Apply market cap filter (in millions)
+            mcap = data.get("market_cap", 0) or 0
+            if mcap and mcap < DISCOVERY_MCAP_MIN_M:
+                logger.info("Enrichment skip %s: cap $%dM < $%dM", symbol, mcap, DISCOVERY_MCAP_MIN_M)
+                continue
+            if mcap and mcap > DISCOVERY_MCAP_MAX_M:
+                logger.info("Enrichment skip %s: cap $%dM > $%dM", symbol, mcap, DISCOVERY_MCAP_MAX_M)
+                continue
+            logger.info("Enrichment pass %s (%s) cap $%.0fM", symbol, data["name"], mcap)
+        except Exception as e:
+            logger.info("Enrichment error %s: %s", symbol, e)
+
+        try:
+            financials = await finnhub.fetch_basic_financials(symbol)
+            data["financials"] = financials
+        except Exception as e:
+            logger.debug("Failed to fetch financials for %s: %s", symbol, e)
+
+        try:
+            recs = await finnhub.fetch_recommendations(symbol)
+            if recs:
+                latest = recs[0]
+                data["analyst_buy"] = latest.get("buy", 0) + latest.get("strongBuy", 0)
+                data["analyst_hold"] = latest.get("hold", 0)
+                data["analyst_sell"] = latest.get("sell", 0) + latest.get("strongSell", 0)
+        except Exception as e:
+            logger.debug("Failed to fetch recommendations for %s: %s", symbol, e)
+
+        # Apply price filter only if we have a real current price (not 52-week high)
+        price = data.get("price", 0)
+        if price and (price < DISCOVERY_PRICE_MIN or price > DISCOVERY_PRICE_MAX):
+            logger.debug("Skipping %s — price $%.2f outside range $%.0f-$%.0f", symbol, price, DISCOVERY_PRICE_MIN, DISCOVERY_PRICE_MAX)
+            continue
+
+        enriched.append(data)
+
+    return enriched
 
 
 # ── Context gatherers ────────────────────────────────────────────────
@@ -134,7 +478,6 @@ async def run_stock_discovery(db: AsyncSession) -> dict[str, Any]:
 
 async def _get_economic_context(db: AsyncSession) -> list[dict]:
     """Get latest economic indicators from the database."""
-    # Get the most recent value for each indicator
     subq = (
         select(
             EconomicIndicator.indicator_code,
@@ -171,7 +514,6 @@ async def _get_watchlist_context(db: AsyncSession) -> dict:
 
     entries = []
     for stock in stocks:
-        # Get latest synthesis for this stock
         synth_result = await db.execute(
             select(ContextSynthesis)
             .where(ContextSynthesis.stock_id == stock.id)
@@ -234,8 +576,69 @@ def _build_user_message(
     portfolio: list[dict],
     hints: list[dict],
     watchlist_count: int,
+    strategy_stats: dict[str, int],
+    enriched_candidates: list[dict],
 ) -> str:
     sections = []
+
+    # Multi-strategy screening results
+    lines = ["## Screening Strategies Used"]
+    total = sum(strategy_stats.values())
+    lines.append(f"Total unique candidates screened: {total}")
+    for strategy, count in strategy_stats.items():
+        lines.append(f"- **{strategy}**: {count} candidates")
+    lines.append(f"\nPreferences: price ${DISCOVERY_PRICE_MIN:.0f}–${DISCOVERY_PRICE_MAX:.0f}, "
+                 f"market cap ${DISCOVERY_MCAP_MIN_M:,}M–${DISCOVERY_MCAP_MAX_M:,}M")
+    sections.append("\n".join(lines))
+
+    # Enriched candidates with fundamentals
+    if enriched_candidates:
+        lines = [f"## Enriched Candidate Stocks ({len(enriched_candidates)} stocks)"]
+        for c in enriched_candidates:
+            parts = [f"**{c['symbol']}**"]
+            if c.get("name"):
+                parts[0] += f" ({c['name']})"
+            if c.get("strategy"):
+                parts.append(f"Found via: {c['strategy']}")
+            if c.get("sector"):
+                parts.append(f"Sector: {c['sector']}")
+            if c.get("percent_change"):
+                parts.append(f"Day change: {c['percent_change']:+.2f}%")
+            if c.get("market_cap"):
+                parts.append(f"Market cap: ${c['market_cap']:.0f}M")
+            if c.get("earnings_date"):
+                parts.append(f"Earnings: {c['earnings_date']}")
+            if c.get("peer_of"):
+                parts.append(f"Peer of: {c['peer_of']}")
+
+            fin = c.get("financials", {})
+            if fin.get("pe_ratio"):
+                parts.append(f"P/E: {fin['pe_ratio']:.1f}")
+            if fin.get("beta"):
+                parts.append(f"Beta: {fin['beta']:.2f}")
+            if fin.get("52_week_return") is not None:
+                parts.append(f"52wk return: {fin['52_week_return']:.1f}%")
+            if fin.get("rsi_14d"):
+                parts.append(f"RSI(14): {fin['rsi_14d']:.1f}")
+            if fin.get("dividend_yield"):
+                parts.append(f"Div yield: {fin['dividend_yield']:.2f}%")
+            if fin.get("net_margin"):
+                parts.append(f"Net margin: {fin['net_margin']:.1f}%")
+
+            analyst_parts = []
+            if c.get("analyst_buy"):
+                analyst_parts.append(f"Buy: {c['analyst_buy']}")
+            if c.get("analyst_hold"):
+                analyst_parts.append(f"Hold: {c['analyst_hold']}")
+            if c.get("analyst_sell"):
+                analyst_parts.append(f"Sell: {c['analyst_sell']}")
+            if analyst_parts:
+                parts.append(f"Analysts: [{', '.join(analyst_parts)}]")
+
+            lines.append("- " + " | ".join(parts))
+        sections.append("\n".join(lines))
+    else:
+        sections.append("## Enriched Candidates\nNo candidates could be enriched with fundamental data. Market may be closed.")
 
     # Economic indicators
     if economic:
@@ -261,7 +664,7 @@ def _build_user_message(
                 parts.append(f"Factors: {', '.join(s['key_factors'][:2])}")
             lines.append("- " + " | ".join(parts))
     else:
-        lines.append("Watchlist is empty — this is the initial discovery run. Recommend a well-diversified starting watchlist.")
+        lines.append("Watchlist is empty — this is the initial discovery run. Build a diversified starting watchlist from the screened candidates.")
     sections.append("\n".join(lines))
 
     # Portfolio positions
@@ -294,7 +697,8 @@ def _build_user_message(
         f"- Target watchlist size: {WATCHLIST_MIN}–{WATCHLIST_MAX} stocks\n"
         f"- Current watchlist: {watchlist_count} stocks\n"
         f"- Max additions per run: 5\n"
-        f"- Only recommend actively-traded US equities on major exchanges"
+        f"- Only recommend stocks from the screened candidates above or user hints\n"
+        f"- Do NOT invent or hallucinate stock symbols"
     )
 
     return "\n\n".join(sections)

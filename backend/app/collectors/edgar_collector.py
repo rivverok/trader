@@ -22,7 +22,7 @@ FILING_TYPES = ["10-K", "10-Q", "8-K"]
 
 class EdgarCollector(BaseCollector):
     name = "edgar"
-    max_requests_per_minute = 10  # SEC asks for max 10 requests/sec, we're conservative
+    max_requests_per_minute = 120  # SEC allows 10 req/sec; 2/sec avg is very safe
 
     def __init__(self):
         super().__init__()
@@ -38,6 +38,7 @@ class EdgarCollector(BaseCollector):
             return {"status": "skip", "reason": "no watchlist stocks"}
 
         total_inserted = 0
+        total_downloaded = 0
         headers = {
             "User-Agent": self.user_agent,
             "Accept": "application/json",
@@ -60,10 +61,17 @@ class EdgarCollector(BaseCollector):
                         "Failed to collect filings for %s: %s", stock.symbol, e
                     )
 
+            # Download content for filings that have a URL but no content yet
+            downloaded = await self._download_missing_content(
+                client, db_session
+            )
+            total_downloaded += downloaded
+
         return {
             "status": "ok",
             "symbols": len(stocks),
             "filings_inserted": total_inserted,
+            "content_downloaded": total_downloaded,
         }
 
     # ── Internal helpers ──────────────────────────────────────────────
@@ -95,19 +103,20 @@ class EdgarCollector(BaseCollector):
 
             for hit in hits[:5]:  # Limit to 5 most recent per type
                 source = hit.get("_source", {})
-                accession = source.get("file_num", "") or hit.get("_id", "")
-                # Build EDGAR filing URL
-                accession_raw = source.get("adsh", accession)
+                # Build EDGAR filing URL from CIK and accession number
+                accession_raw = source.get("adsh", "")
                 filed_date_str = source.get("file_date", "")
+                ciks = source.get("ciks", [])
 
-                if not accession_raw or not filed_date_str:
+                if not accession_raw or not filed_date_str or not ciks:
                     continue
 
-                # Clean accession number for URL construction
+                cik = ciks[0]  # e.g. "0000050863"
+                # Clean accession number for URL path (remove dashes)
                 accession_clean = accession_raw.replace("-", "")
                 filing_url = (
                     f"https://www.sec.gov/Archives/edgar/data/"
-                    f"{source.get('entity_id', '')}/{accession_clean}/{accession_raw}.txt"
+                    f"{cik}/{accession_clean}/{accession_raw}-index.htm"
                 )
 
                 try:
@@ -127,15 +136,62 @@ class EdgarCollector(BaseCollector):
         return filings_found
 
     async def _fetch_filing_content(self, client, url: str) -> str | None:
-        """Download the raw filing text. Returns None on failure."""
+        """Download the raw filing text. Returns None on failure.
+        
+        The URL points to the filing index page (-index.htm). We convert it
+        to the full submission text file (.txt) for easy parsing.
+        """
         try:
-            resp = await self._request_with_retry(client, "GET", url)
+            # Convert index URL to full submission text URL
+            # e.g. .../0000050863-25-000009-index.htm -> .../0000050863-25-000009.txt
+            text_url = url.replace("-index.htm", ".txt")
+            resp = await self._request_with_retry(client, "GET", text_url)
             text = resp.text
-            # Truncate very large filings to ~500KB to manage DB size
-            return text[:500_000] if text else None
+            if not text:
+                return None
+            # Strip SGML headers/tags for cleaner content, keep just text
+            # Truncate very large filings to ~200KB to manage DB size and Claude token limits
+            cleaned = text[:200_000]
+            return cleaned
         except Exception as e:
-            self.logger.warning("Could not download filing content: %s", e)
+            self.logger.warning("Could not download filing content from %s: %s", url, e)
             return None
+
+    async def _download_missing_content(
+        self, client, session: AsyncSession
+    ) -> int:
+        """Download raw content for filings that have a URL but no content."""
+        from sqlalchemy import update
+
+        result = await session.execute(
+            select(SecFiling)
+            .where(SecFiling.raw_content.is_(None))
+            .where(SecFiling.url.isnot(None))
+            .order_by(SecFiling.filed_date.desc())
+            .limit(250)  # Process a large batch; rate limiter handles pacing
+        )
+        filings = list(result.scalars().all())
+        if not filings:
+            return 0
+
+        downloaded = 0
+        for filing in filings:
+            content = await self._fetch_filing_content(client, filing.url)
+            if content and len(content) > 100:
+                await session.execute(
+                    update(SecFiling)
+                    .where(SecFiling.id == filing.id)
+                    .values(raw_content=content)
+                )
+                downloaded += 1
+                self.logger.info(
+                    "Downloaded content for filing %s (%d chars)",
+                    filing.accession_number, len(content),
+                )
+
+        if downloaded:
+            await session.commit()
+        return downloaded
 
     async def _store_filings(
         self, session: AsyncSession, filings: list[dict], stock_id: int

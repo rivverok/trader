@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     # ── Anthropic (Claude) ──
     ANTHROPIC_API_KEY: str = ""
-    CLAUDE_MODEL_FAST: str = "claude-3-5-haiku-20241022"
+    CLAUDE_MODEL_FAST: str = "claude-haiku-4-5-20251001"
     CLAUDE_MODEL_SMART: str = "claude-sonnet-4-20250514"
 
     # ── Finnhub ──

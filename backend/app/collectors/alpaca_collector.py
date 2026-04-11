@@ -107,6 +107,48 @@ class AlpacaCollector(BaseCollector):
                 "industry": "",
             }
 
+    async def fetch_movers(self, top: int = 20) -> dict[str, list[dict]]:
+        """Fetch top market movers (gainers and losers) from Alpaca screener."""
+        async with self._build_client(headers=self.headers) as client:
+            resp = await self._request_with_retry(
+                client, "GET",
+                f"{self.data_url}/v1beta1/screener/stocks/movers",
+                params={"top": min(top, 50)},
+            )
+            data = resp.json()
+            return {
+                "gainers": data.get("gainers", []),
+                "losers": data.get("losers", []),
+            }
+
+    async def fetch_most_active(self, top: int = 20) -> list[dict]:
+        """Fetch most active stocks by volume from Alpaca screener."""
+        async with self._build_client(headers=self.headers) as client:
+            resp = await self._request_with_retry(
+                client, "GET",
+                f"{self.data_url}/v1beta1/screener/stocks/most-actives",
+                params={"by": "volume", "top": min(top, 100)},
+            )
+            data = resp.json()
+            return data.get("most_actives", [])
+
+    async def fetch_snapshots(self, symbols: list[str]) -> dict[str, dict]:
+        """Fetch real-time snapshots (quote + bars) for multiple symbols."""
+        if not symbols:
+            return {}
+        async with self._build_client(headers=self.headers) as client:
+            result = {}
+            # API accepts max ~200 symbols per request
+            for i in range(0, len(symbols), 200):
+                batch = symbols[i:i + 200]
+                resp = await self._request_with_retry(
+                    client, "GET",
+                    f"{self.data_url}/v2/stocks/snapshots",
+                    params={"symbols": ",".join(batch), "feed": "iex"},
+                )
+                result.update(resp.json())
+            return result
+
     # ── Internal helpers ──────────────────────────────────────────────
 
     async def _get_watchlist_stocks(self, session: AsyncSession) -> list[Stock]:
@@ -119,7 +161,7 @@ class AlpacaCollector(BaseCollector):
         self, client, symbols: list[str]
     ) -> dict[str, list[dict]]:
         """Fetch the latest bar for each symbol."""
-        params = {"symbols": ",".join(symbols), "timeframe": "1Min", "limit": 1}
+        params = {"symbols": ",".join(symbols), "feed": "iex"}
         resp = await self._request_with_retry(
             client, "GET", f"{self.data_url}/v2/stocks/bars/latest", params=params,
         )
@@ -143,6 +185,7 @@ class AlpacaCollector(BaseCollector):
                 "symbols": ",".join(symbols),
                 "timeframe": timeframe,
                 "limit": 10000,
+                "feed": "iex",
             }
             if start:
                 params["start"] = start
@@ -182,9 +225,12 @@ class AlpacaCollector(BaseCollector):
             if isinstance(bar_list, dict):
                 bar_list = [bar_list]
             for bar in bar_list:
+                ts = bar["t"]
+                if isinstance(ts, str):
+                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                 rows.append({
                     "stock_id": stock_id,
-                    "timestamp": bar["t"],
+                    "timestamp": ts,
                     "open": float(bar["o"]),
                     "high": float(bar["h"]),
                     "low": float(bar["l"]),

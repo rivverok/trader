@@ -49,7 +49,7 @@ def upgrade() -> None:
         sa.Column("close", sa.Float(), nullable=False),
         sa.Column("volume", sa.BigInteger(), nullable=False),
         sa.Column("interval", sa.String(10), nullable=False, server_default="1Day"),
-        sa.PrimaryKeyConstraint("id"),
+        sa.PrimaryKeyConstraint("id", "timestamp"),
     )
     op.create_index("ix_prices_stock_id", "prices", ["stock_id"])
     op.create_index("ix_prices_timestamp", "prices", ["timestamp"])

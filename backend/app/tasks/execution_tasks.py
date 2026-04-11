@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 def _run_async(coro):
     """Run an async coroutine from a sync Celery task."""
     import asyncio
-    loop = asyncio.new_event_loop()
+    from app.database import engine
+    asyncio.get_event_loop_policy().set_event_loop(loop := asyncio.new_event_loop())
     try:
+        loop.run_until_complete(engine.dispose())
         return loop.run_until_complete(coro)
     finally:
         loop.close()

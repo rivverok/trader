@@ -120,7 +120,7 @@ export default function WatchlistPage() {
                 <span className="text-muted-foreground">Time: </span>
                 {new Date(discoveryStatus.last_run).toLocaleString()}
               </div>
-              {discoveryStatus.last_result.status && (
+              {discoveryStatus.last_result.status ? (
                 <div>
                   <span className="text-muted-foreground">Status: </span>
                   <span
@@ -133,13 +133,13 @@ export default function WatchlistPage() {
                     {String(discoveryStatus.last_result.status)}
                   </span>
                 </div>
-              )}
-              {discoveryStatus.last_result.market_assessment && (
+              ) : null}
+              {discoveryStatus.last_result.market_assessment ? (
                 <div className="flex-1">
                   <span className="text-muted-foreground">Market: </span>
                   {String(discoveryStatus.last_result.market_assessment)}
                 </div>
-              )}
+              ) : null}
             </div>
           </CardContent>
         </Card>
