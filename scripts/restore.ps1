@@ -67,9 +67,14 @@ docker compose exec -T postgres psql -U trader -d postgres -c "SELECT pg_termina
 docker compose exec -T postgres dropdb -U trader --if-exists trader
 docker compose exec -T postgres createdb -U trader trader
 
-# Restore the dump — copy into container to avoid PowerShell binary corruption
+# Enable TimescaleDB extension before restore
+docker compose exec -T postgres psql -U trader -d trader -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
+
+# Restore the dump — copy into container, use TimescaleDB pre/post hooks
 docker cp $dumpFile "${composeProject}-postgres-1:/tmp/trader.dump"
+docker compose exec -T postgres psql -U trader -d trader -c "SELECT timescaledb_pre_restore();"
 docker compose exec -T postgres pg_restore -U trader -d trader --no-owner --role=trader --disable-triggers /tmp/trader.dump
+docker compose exec -T postgres psql -U trader -d trader -c "SELECT timescaledb_post_restore();"
 docker compose exec -T postgres rm /tmp/trader.dump
 
 Write-Host "       Database restored"

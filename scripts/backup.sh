@@ -19,8 +19,13 @@ mkdir -p "$BACKUP_DIR"
 echo ""
 echo "[1/3] Dumping PostgreSQL database..."
 docker compose exec -T postgres pg_dump -U trader -d trader --format=custom --compress=6 > "$BACKUP_DIR/trader.dump"
-DUMP_SIZE=$(du -h "$BACKUP_DIR/trader.dump" | cut -f1)
-echo "       Database dump: $DUMP_SIZE"
+DUMP_SIZE=$(stat -c%s "$BACKUP_DIR/trader.dump" 2>/dev/null || stat -f%z "$BACKUP_DIR/trader.dump")
+if [ "$DUMP_SIZE" -eq 0 ]; then
+    rm -rf "$BACKUP_DIR"
+    echo "ERROR: Database dump is empty (0 bytes). Are the containers running? Check with: docker compose ps" >&2
+    exit 1
+fi
+echo "       Database dump: $(du -h "$BACKUP_DIR/trader.dump" | cut -f1)"
 
 # 2. Copy .env (contains API keys and secrets)
 echo "[2/3] Copying .env..."

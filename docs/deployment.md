@@ -207,15 +207,23 @@ The app is accessible at `http://localhost:5000`.
 
 Use the backup/restore scripts to migrate all database data and configuration between machines.
 
-### 3.1 Create a Backup (Source Machine — Windows)
+### 3.1 Create a Backup (Source Machine)
 
 From the project root:
 
+**Windows:**
 ```powershell
 .\scripts\backup.ps1
+.\scripts\backup.ps1 -OutDir D:\my-backups   # custom output
 ```
 
-This creates a folder under `backups\` containing:
+**Ubuntu:**
+```bash
+./scripts/backup.sh
+./scripts/backup.sh /mnt/external/backups   # custom output
+```
+
+This creates a folder under `backups/` containing:
 
 | File | Contents |
 |---|---|
@@ -224,12 +232,6 @@ This creates a folder under `backups\` containing:
 | `manifest.json` | Timestamp and row counts for verification |
 
 The script prints row counts so you can verify the backup captured everything.
-
-**Custom output directory:**
-
-```powershell
-.\scripts\backup.ps1 -OutDir D:\my-backups
-```
 
 ### 3.2 Transfer the Backup
 
@@ -247,54 +249,25 @@ rsync -avz .\backups\backup-20260411-120000\ user@riv-ubuntu:/opt/trader/backups
 
 ### 3.3 Restore on the Destination Machine
 
-#### On Windows (PowerShell)
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\projects\trader
 .\scripts\restore.ps1 -BackupDir .\backups\backup-20260411-120000
 ```
 
-#### On Ubuntu (Bash)
-
-The restore script is written in PowerShell. On Ubuntu, run the equivalent commands manually:
+**Ubuntu (Bash):**
 
 ```bash
 cd /opt/trader
-BACKUP_DIR=./backups/backup-20260411-120000
 
-# 1. Restore .env if needed
-if [ ! -f .env ] && [ -f "$BACKUP_DIR/.env" ]; then
-    cp "$BACKUP_DIR/.env" .env
-    echo ".env restored from backup"
-fi
+# Make scripts executable (first time only)
+chmod +x scripts/*.sh
 
-# 2. Start postgres if not running
-docker compose up -d postgres
-echo "Waiting for PostgreSQL..."
-until docker compose exec -T postgres pg_isready -U trader; do
-    sleep 2
-done
-
-# 3. Drop and recreate database
-docker compose exec -T postgres psql -U trader -d postgres -c \
-    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'trader' AND pid != pg_backend_pid();" > /dev/null 2>&1
-docker compose exec -T postgres dropdb -U trader --if-exists trader
-docker compose exec -T postgres createdb -U trader trader
-
-# 4. Restore the dump
-docker cp "$BACKUP_DIR/trader.dump" trader-postgres-1:/tmp/trader.dump
-docker compose exec -T postgres pg_restore -U trader -d trader \
-    --no-owner --role=trader --disable-triggers /tmp/trader.dump
-docker compose exec -T postgres rm /tmp/trader.dump
-
-# 5. Verify
-docker compose exec -T postgres psql -U trader -d trader -t -A -c \
-    "SELECT 'stocks: ' || COUNT(*) FROM stocks
-     UNION ALL SELECT 'articles: ' || COUNT(*) FROM news_articles
-     UNION ALL SELECT 'filings: ' || COUNT(*) FROM sec_filings;"
-
-echo "Restore complete"
+./scripts/restore.sh ./backups/backup-20260411-120000
 ```
+
+Both scripts perform the same steps: restore `.env` if missing, start PostgreSQL, drop/recreate the database, load the dump, and verify row counts.
 
 ### 3.4 Start All Services After Restore
 

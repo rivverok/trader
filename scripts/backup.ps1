@@ -24,6 +24,10 @@ $dumpPath = Join-Path $backupDir "trader.dump"
 cmd /c "docker compose exec -T postgres pg_dump -U trader -d trader --format=custom --compress=6 > `"$dumpPath`""
 
 $dumpSize = (Get-Item (Join-Path $backupDir "trader.dump")).Length
+if ($dumpSize -eq 0) {
+    Remove-Item -Recurse -Force $backupDir
+    throw "ERROR: Database dump is empty (0 bytes). Are the containers running? Check with: docker compose ps"
+}
 Write-Host "       Database dump: $([math]::Round($dumpSize / 1MB, 1)) MB"
 
 # 2. Copy .env (contains API keys and secrets)
