@@ -14,11 +14,11 @@ def calculate_position_size(
     portfolio_value: float,
     confidence: float,
     current_shares: float = 0.0,
-    autonomous: bool = False,
+    growth_mode: bool = False,
 ) -> float:
     """Calculate number of shares for a trade.
 
-    In autonomous mode, sizes trades as a % of portfolio (default 10%) scaled by
+    In growth mode, sizes trades as a % of portfolio (default 10%) scaled by
     confidence — designed for small accounts that reinvest all gains.
 
     In normal mode, uses fixed-fractional: risk a fixed % of portfolio per trade,
@@ -29,8 +29,8 @@ def calculate_position_size(
     if price <= 0 or portfolio_value <= 0:
         return 0.0
 
-    if autonomous or settings.AUTONOMOUS_MODE:
-        shares = _autonomous_sizing(action, price, portfolio_value, confidence, current_shares)
+    if growth_mode or settings.GROWTH_MODE:
+        shares = _growth_sizing(action, price, portfolio_value, confidence, current_shares)
     elif settings.POSITION_SIZE_METHOD == "fixed_fractional":
         shares = _fixed_fractional(action, price, portfolio_value, confidence, current_shares)
     else:
@@ -39,14 +39,14 @@ def calculate_position_size(
     return max(0.0, math.floor(shares))
 
 
-def _autonomous_sizing(
+def _growth_sizing(
     action: str,
     price: float,
     portfolio_value: float,
     confidence: float,
     current_shares: float,
 ) -> float:
-    """Autonomous mode: allocate X% of portfolio per trade, scaled by confidence.
+    """Growth mode: allocate X% of portfolio per trade, scaled by confidence.
 
     For a $1000 account with 10% position size and 0.8 confidence:
       $1000 * 10% * 0.8 = $80 → shares = 80 / price
@@ -54,7 +54,7 @@ def _autonomous_sizing(
     Cap at max_trade_dollars as a hard safety limit, and also cap at
     max_position_pct of portfolio to prevent over-concentration.
     """
-    position_pct = settings.AUTONOMOUS_POSITION_PCT / 100.0
+    position_pct = settings.GROWTH_POSITION_PCT / 100.0
     max_trade = settings.RISK_MAX_TRADE_DOLLARS
 
     # Scale by confidence (higher confidence → bigger position)

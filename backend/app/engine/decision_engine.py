@@ -53,9 +53,9 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
         return {"status": "halted", "reason": risk_state.halt_reason}
 
     # Get portfolio value for position sizing
-    # In autonomous mode, prefer live Alpaca equity for accurate sizing
-    autonomous = risk_state.autonomous_mode
-    portfolio_value = await _get_portfolio_value(db, use_live=autonomous)
+    # In growth mode, prefer live Alpaca equity for accurate sizing
+    growth_mode = risk_state.growth_mode
+    portfolio_value = await _get_portfolio_value(db, use_live=growth_mode)
 
     proposed = 0
     skipped = 0
@@ -98,7 +98,7 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
                 portfolio_value=portfolio_value,
                 confidence=decision.get("confidence", pkg.combined_confidence),
                 current_shares=pkg.current_position.shares if pkg.current_position else 0,
-                autonomous=autonomous,
+                growth_mode=growth_mode,
             )
             if shares <= 0:
                 skipped += 1
@@ -165,7 +165,7 @@ async def _get_watchlist(db: AsyncSession) -> list[Stock]:
 async def _get_portfolio_value(db: AsyncSession, use_live: bool = False) -> float:
     """Get total portfolio value.
 
-    When use_live=True (autonomous mode), query Alpaca for real-time equity
+    When use_live=True (growth mode), query Alpaca for real-time equity
     so position sizing reflects the actual account balance including cash.
     Falls back to latest snapshot if Alpaca is unreachable.
     """

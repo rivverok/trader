@@ -111,13 +111,13 @@ export default function ConfigPage() {
         </p>
       </div>
 
-      {/* ── Autonomous Mode ── */}
+      {/* ── Growth Mode ── */}
       {system && (
-        <Card className={system.autonomous_mode ? "border-primary/50 bg-primary/5" : ""}>
+        <Card className={system.growth_mode ? "border-primary/50 bg-primary/5" : ""}>
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Autonomous Mode</CardTitle>
+                <CardTitle>Growth Mode</CardTitle>
                 <CardDescription>
                   Seed the account and let the system manage it hands-off.
                   It will invest, sell, and reinvest with the goal of growing
@@ -126,23 +126,23 @@ export default function ConfigPage() {
                 </CardDescription>
               </div>
               <Button
-                variant={system.autonomous_mode ? "destructive" : "default"}
+                variant={system.growth_mode ? "destructive" : "default"}
                 size="sm"
                 onClick={async () => {
-                  const next = !system.autonomous_mode;
+                  const next = !system.growth_mode;
                   const res = await api.system.toggleAutonomousMode(next);
                   setSystem((prev) =>
                     prev
                       ? {
                           ...prev,
-                          autonomous_mode: res.autonomous_mode,
+                          growth_mode: res.growth_mode,
                           auto_execute: res.auto_execute,
                         }
                       : prev
                   );
                 }}
               >
-                {system.autonomous_mode ? "Disable" : "Enable"}
+                {system.growth_mode ? "Disable" : "Enable"}
               </Button>
             </div>
           </CardHeader>
@@ -151,9 +151,9 @@ export default function ConfigPage() {
               <div className="space-y-1">
                 <div className="text-sm text-muted-foreground">Status</div>
                 <div
-                  className={`text-lg font-bold ${system.autonomous_mode ? "text-primary" : "text-muted-foreground"}`}
+                  className={`text-lg font-bold ${system.growth_mode ? "text-primary" : "text-muted-foreground"}`}
                 >
-                  {system.autonomous_mode ? "ACTIVE" : "Off"}
+                  {system.growth_mode ? "ACTIVE" : "Off"}
                 </div>
               </div>
               <div className="space-y-1">
@@ -173,7 +173,7 @@ export default function ConfigPage() {
                 </div>
               </div>
             </div>
-            {system.autonomous_mode && (
+            {system.growth_mode && (
               <p className="mt-4 rounded-md bg-primary/10 px-3 py-2 text-sm text-primary">
                 The system is fully managing this account. Trades are
                 auto-approved, sized at up to 10% of portfolio per trade

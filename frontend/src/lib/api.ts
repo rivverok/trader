@@ -274,8 +274,9 @@ export interface ExecutedTradeItem {
 
 export interface SystemStatus {
   auto_execute: boolean;
-  autonomous_mode: boolean;
+  growth_mode: boolean;
   trading_paused: boolean;
+  system_paused: boolean;
   trading_halted: boolean;
   halt_reason: string | null;
   account_status: string;
@@ -631,10 +632,14 @@ export const api = {
         method: "POST",
       }),
     toggleAutonomousMode: (enable: boolean) =>
-      fetchApi<{ autonomous_mode: boolean; auto_execute: boolean }>(
-        `/system/autonomous-mode?enable=${enable}`,
+      fetchApi<{ growth_mode: boolean; auto_execute: boolean }>(
+        `/system/growth-mode?enable=${enable}`,
         { method: "POST" },
       ),
+    pauseSystem: () =>
+      fetchApi<{ status: string }>("/system/pause-system", { method: "POST" }),
+    resumeSystem: () =>
+      fetchApi<{ status: string }>("/system/resume-system", { method: "POST" }),
     emergencyStop: () =>
       fetchApi<{ status: string }>("/system/emergency-stop", {
         method: "POST",

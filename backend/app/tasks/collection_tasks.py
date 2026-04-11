@@ -46,6 +46,9 @@ def _run_async(coro):
 @celery_app.task(name="collect_prices", bind=True, max_retries=2)
 def collect_prices(self):
     """Collect latest 1-min bars for watchlist stocks."""
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     try:
         from app.collectors.alpaca_collector import AlpacaCollector
 
@@ -67,6 +70,9 @@ def collect_prices(self):
 @celery_app.task(name="collect_daily_bars", bind=True, max_retries=2)
 def collect_daily_bars(self):
     """Collect end-of-day bars after market close."""
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     try:
         from app.collectors.alpaca_collector import AlpacaCollector
 
@@ -90,6 +96,9 @@ def collect_daily_bars(self):
 @celery_app.task(name="collect_news", bind=True, max_retries=2)
 def collect_news(self):
     """Collect news articles for watchlist stocks from Finnhub."""
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     try:
         from app.collectors.finnhub_collector import FinnhubCollector
 
@@ -113,6 +122,9 @@ def collect_news(self):
 @celery_app.task(name="collect_economic_data", bind=True, max_retries=2)
 def collect_economic_data(self):
     """Collect economic indicators from FRED."""
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     try:
         from app.collectors.fred_collector import FredCollector
 
@@ -136,6 +148,9 @@ def collect_economic_data(self):
 @celery_app.task(name="collect_filings", bind=True, max_retries=2)
 def collect_filings(self):
     """Collect SEC filings for watchlist stocks from EDGAR."""
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     try:
         from app.collectors.edgar_collector import EdgarCollector
 

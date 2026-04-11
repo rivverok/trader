@@ -28,8 +28,9 @@ class RiskState(TimestampMixin, Base):
 
     # ── System control flags ──
     auto_execute: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    autonomous_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    growth_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     trading_paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    system_paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # ── Runtime state ──
     trading_halted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

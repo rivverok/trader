@@ -39,6 +39,9 @@ def discover_stocks(self) -> dict:
     Scheduled to run Tue/Thu at 7:00 AM ET (before market open).
     Can also be triggered manually.
     """
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     logger.info("Starting stock discovery cycle")
 
     async def _run() -> dict:

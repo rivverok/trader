@@ -43,6 +43,9 @@ def _run_async(coro):
 @celery_app.task(name="generate_ml_signals", bind=True, max_retries=1)
 def generate_ml_signals(self):
     """Generate ML signals for all watchlist stocks using the active model."""
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     try:
         from app.ml.technical_signals import generate_all_signals
 
@@ -291,6 +294,9 @@ def run_backtest_task(
 @celery_app.task(name="check_model_staleness", max_retries=0)
 def check_model_staleness():
     """Check if the active ML model is stale and create an alert if so."""
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     import os
     from datetime import timedelta
 

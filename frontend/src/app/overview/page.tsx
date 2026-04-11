@@ -251,7 +251,8 @@ export default function OverviewPage() {
               }
             />
             {systemStatus.auto_execute && <StatusPill label="Auto-Execute" color="blue" />}
-            {systemStatus.autonomous_mode && <StatusPill label="Autonomous" color="purple" />}
+            {systemStatus.growth_mode && <StatusPill label="Growth Mode" color="purple" />}
+            {systemStatus.system_paused && <StatusPill label="System Paused" color="yellow" />}
           </div>
         )}
       </div>

@@ -76,3 +76,29 @@ def get_all_task_status() -> dict[str, dict]:
     except Exception as e:
         logger.warning("Failed to read task statuses: %s", e)
         return {}
+
+
+def is_system_paused() -> bool:
+    """Check if the system is paused by reading the DB flag via a quick query.
+
+    Returns True if system_paused is set, meaning all scheduled tasks should skip.
+    """
+    try:
+        import asyncio
+        from app.database import async_session, engine
+        from app.engine.risk_manager import get_risk_state
+
+        async def _check():
+            async with async_session() as db:
+                state = await get_risk_state(db)
+                return state.system_paused
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(engine.dispose())
+            return loop.run_until_complete(_check())
+        finally:
+            loop.close()
+    except Exception as e:
+        logger.warning("Failed to check system_paused: %s", e)
+        return False

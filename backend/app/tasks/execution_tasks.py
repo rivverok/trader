@@ -30,7 +30,9 @@ def _run_async(coro):
 @shared_task(name="execute_approved_trades")
 def execute_approved_trades_task():
     """Execute all approved (but not yet executed) trades. Runs every 1 minute."""
-    from app.tasks.task_status import update_task_status
+    from app.tasks.task_status import update_task_status, is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     result = _run_async(_execute_approved_trades())
     update_task_status("execute_approved_trades", result)
     return result
@@ -71,7 +73,9 @@ async def _execute_approved_trades():
 @shared_task(name="sync_portfolio")
 def sync_portfolio_task():
     """Sync portfolio from Alpaca. Runs every 5 minutes."""
-    from app.tasks.task_status import update_task_status
+    from app.tasks.task_status import update_task_status, is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     result = _run_async(_sync_portfolio())
     update_task_status("sync_portfolio", result)
     return result
@@ -101,7 +105,9 @@ async def _sync_portfolio():
 @shared_task(name="check_stop_loss_orders")
 def check_stop_loss_orders_task():
     """Monitor stop-loss and take-profit order status. Runs every 1 minute."""
-    from app.tasks.task_status import update_task_status
+    from app.tasks.task_status import update_task_status, is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     result = _run_async(_check_stop_loss_orders())
     update_task_status("check_stop_loss_orders", result)
     return result
@@ -144,7 +150,9 @@ async def _check_stop_loss_orders():
 def auto_execute_proposals_task():
     """When auto_execute is on, auto-approve proposed trades that pass risk checks.
     Runs every 1 minute."""
-    from app.tasks.task_status import update_task_status
+    from app.tasks.task_status import update_task_status, is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     result = _run_async(_auto_execute_proposals())
     update_task_status("auto_execute_proposals", result)
     return result
@@ -153,7 +161,7 @@ def auto_execute_proposals_task():
 async def _auto_execute_proposals():
     async with async_session() as db:
         state = await get_risk_state(db)
-        if not state.auto_execute and not state.autonomous_mode:
+        if not state.auto_execute and not state.growth_mode:
             return {"status": "auto_execute_off", "approved": 0}
         if state.trading_paused or state.trading_halted:
             return {"status": "paused_or_halted", "approved": 0}

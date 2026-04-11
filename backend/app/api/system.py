@@ -20,8 +20,9 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 
 class SystemStatus(BaseModel):
     auto_execute: bool
-    autonomous_mode: bool
+    growth_mode: bool
     trading_paused: bool
+    system_paused: bool
     trading_halted: bool
     halt_reason: str | None
     account_status: str
@@ -54,8 +55,9 @@ async def system_status(db: AsyncSession = Depends(get_db)):
     account = await get_account_info()
     return SystemStatus(
         auto_execute=state.auto_execute,
-        autonomous_mode=state.autonomous_mode,
+        growth_mode=state.growth_mode,
         trading_paused=state.trading_paused,
+        system_paused=state.system_paused,
         trading_halted=state.trading_halted,
         halt_reason=state.halt_reason,
         account_status=account.get("status", "unknown"),
@@ -97,29 +99,49 @@ async def toggle_auto_execute(
     return {"auto_execute": enable}
 
 
-@router.post("/autonomous-mode")
-async def toggle_autonomous_mode(
+@router.post("/growth-mode")
+async def toggle_growth_mode(
     enable: bool,
     db: AsyncSession = Depends(get_db),
 ):
-    """Enable or disable autonomous mode.
+    """Enable or disable growth mode.
 
     When enabled, the system fully manages the account:
     - Auto-approves trades that pass risk checks
     - Sizes positions as a % of actual portfolio (not tiny risk-based amounts)
     - Reinvests all gains to grow account value
-
-    Ideal for seeding the account with a starting amount (e.g. $1000)
-    and letting the system manage it autonomously.
     """
     state = await get_risk_state(db)
-    state.autonomous_mode = enable
-    # Autonomous mode implies auto-execute
+    state.growth_mode = enable
+    # Growth mode implies auto-execute
     if enable:
         state.auto_execute = True
     state.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    return {"autonomous_mode": enable, "auto_execute": state.auto_execute}
+    return {"growth_mode": enable, "auto_execute": state.auto_execute}
+
+
+@router.post("/pause-system")
+async def pause_system(db: AsyncSession = Depends(get_db)):
+    """Pause all scheduled tasks — stops data collection, analysis, ML, and trading.
+
+    Use this to prevent API costs (Claude, data providers, etc.) when idle.
+    """
+    state = await get_risk_state(db)
+    state.system_paused = True
+    state.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "system_paused"}
+
+
+@router.post("/resume-system")
+async def resume_system(db: AsyncSession = Depends(get_db)):
+    """Resume all scheduled tasks after a system pause."""
+    state = await get_risk_state(db)
+    state.system_paused = False
+    state.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "system_resumed"}
 
 
 @router.post("/emergency-stop")

@@ -36,6 +36,9 @@ def run_decision_cycle_task(self) -> dict:
     Runs every 30 minutes during market hours.
     """
     from datetime import datetime, timezone
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
 
     logger.info("Starting decision cycle")
 

@@ -42,6 +42,9 @@ def _run_async(coro):
 @celery_app.task(name="analyze_news_sentiment", bind=True, max_retries=1)
 def analyze_news_sentiment(self):
     """Analyze pending news articles using Claude Haiku."""
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     try:
         from app.analysis.sentiment import analyze_pending_news
 
@@ -64,6 +67,9 @@ def analyze_news_sentiment(self):
 @celery_app.task(name="analyze_filings", bind=True, max_retries=1)
 def analyze_filings(self):
     """Analyze pending SEC filings using Claude Sonnet."""
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     try:
         from app.analysis.filings import analyze_pending_filings
 
@@ -86,6 +92,9 @@ def analyze_filings(self):
 @celery_app.task(name="run_context_synthesis", bind=True, max_retries=1)
 def run_context_synthesis(self):
     """Run holistic context synthesis for all watchlist stocks using Claude Sonnet."""
+    from app.tasks.task_status import is_system_paused
+    if is_system_paused():
+        return {"status": "system_paused"}
     try:
         from app.analysis.context_synthesis import run_context_synthesis as _synth
 

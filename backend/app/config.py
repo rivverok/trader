@@ -62,11 +62,11 @@ class Settings(BaseSettings):
     DEFAULT_TAKE_PROFIT_PCT: float = 10.0
     AUTO_EXECUTE: bool = False
 
-    # ── Autonomous Mode ──
+    # ── Growth Mode ──
     # When enabled, the system fully manages the account: auto-approves trades,
     # sizes positions as a % of actual portfolio value, and reinvests profits.
-    AUTONOMOUS_MODE: bool = False
-    AUTONOMOUS_POSITION_PCT: float = 10.0  # Max % of portfolio per trade in autonomous mode
+    GROWTH_MODE: bool = False
+    GROWTH_POSITION_PCT: float = 10.0  # Max % of portfolio per trade in growth mode
 
     # ── Scheduled Task Intervals (seconds) ──
     COLLECT_PRICES_INTERVAL_SEC: int = 60

@@ -153,6 +153,8 @@ export default function DashboardPage() {
               {systemStatus ? (
                 systemStatus.trading_halted ? (
                   <span className="text-destructive">Halted</span>
+                ) : systemStatus.system_paused ? (
+                  <span className="text-orange-500">System Paused</span>
                 ) : systemStatus.trading_paused ? (
                   <span className="text-yellow-500">Paused</span>
                 ) : (
@@ -166,7 +168,7 @@ export default function DashboardPage() {
           <CardContent>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span>Auto-execute: {systemStatus?.auto_execute ? "ON" : "OFF"}</span>
-              {systemStatus?.autonomous_mode && <span>| <span className="text-primary font-medium">Autonomous</span></span>}
+              {systemStatus?.growth_mode && <span>| <span className="text-primary font-medium">Growth</span></span>}
               {health && <span>| {health.trading_mode}</span>}
             </div>
           </CardContent>
@@ -181,6 +183,19 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-3">
+              {systemStatus.system_paused ? (
+                <Button size="sm" variant="default" onClick={() => api.system.resumeSystem().then(refresh)}>
+                  Resume System
+                </Button>
+              ) : (
+                <Button size="sm" variant="secondary" onClick={() => {
+                  if (confirm("Pause all scheduled tasks? This stops data collection, analysis, ML, and trading to save costs.")) {
+                    api.system.pauseSystem().then(refresh);
+                  }
+                }}>
+                  Pause System
+                </Button>
+              )}
               {systemStatus.trading_paused ? (
                 <Button size="sm" variant="default" onClick={() => api.system.resume().then(refresh)}>
                   Resume Trading
@@ -199,10 +214,10 @@ export default function DashboardPage() {
               </Button>
               <Button
                 size="sm"
-                variant={systemStatus.autonomous_mode ? "secondary" : "default"}
-                onClick={() => api.system.toggleAutonomousMode(!systemStatus.autonomous_mode).then(refresh)}
+                variant={systemStatus.growth_mode ? "secondary" : "default"}
+                onClick={() => api.system.toggleAutonomousMode(!systemStatus.growth_mode).then(refresh)}
               >
-                {systemStatus.autonomous_mode ? "Disable Autonomous" : "Enable Autonomous"}
+                {systemStatus.growth_mode ? "Disable Growth Mode" : "Enable Growth Mode"}
               </Button>
               <Button
                 size="sm"
