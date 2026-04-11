@@ -260,5 +260,5 @@ async def trigger_analysis(task_name: str):
             404,
             detail=f"Unknown task: {task_name}. Available: {list(tasks.keys())}",
         )
-    result = task_fn.delay()
+    result = task_fn.delay(force=True)
     return {"task_id": str(result.id), "task_name": task_name}

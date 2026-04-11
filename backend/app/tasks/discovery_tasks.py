@@ -33,14 +33,14 @@ def _run_async(coro):
 
 
 @celery_app.task(name="discover_stocks", bind=True, max_retries=1)
-def discover_stocks(self) -> dict:
+def discover_stocks(self, force=False) -> dict:
     """Run the AI stock discovery engine to find and curate watchlist stocks.
 
     Scheduled to run Tue/Thu at 7:00 AM ET (before market open).
     Can also be triggered manually.
     """
     from app.tasks.task_status import is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     logger.info("Starting stock discovery cycle")
 

@@ -132,7 +132,7 @@ async def trigger_discovery():
     """Manually trigger a stock discovery cycle."""
     from app.tasks.discovery_tasks import discover_stocks
 
-    task = discover_stocks.delay()
+    task = discover_stocks.delay(force=True)
     return {"task_id": task.id, "task_name": "discover_stocks"}
 
 

@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/trades", tags=["trades"])
 async def trigger_decision_cycle():
     """Manually trigger the decision engine to generate trade proposals."""
     from app.tasks.decision_tasks import run_decision_cycle_task
-    result = run_decision_cycle_task.delay()
+    result = run_decision_cycle_task.delay(force=True)
     return {"task_id": str(result.id), "status": "queued"}
 
 

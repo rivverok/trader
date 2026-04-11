@@ -28,10 +28,10 @@ def _run_async(coro):
 
 
 @shared_task(name="execute_approved_trades")
-def execute_approved_trades_task():
+def execute_approved_trades_task(force=False):
     """Execute all approved (but not yet executed) trades. Runs every 1 minute."""
     from app.tasks.task_status import update_task_status, is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     result = _run_async(_execute_approved_trades())
     update_task_status("execute_approved_trades", result)
@@ -71,10 +71,10 @@ async def _execute_approved_trades():
 
 
 @shared_task(name="sync_portfolio")
-def sync_portfolio_task():
+def sync_portfolio_task(force=False):
     """Sync portfolio from Alpaca. Runs every 5 minutes."""
     from app.tasks.task_status import update_task_status, is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     result = _run_async(_sync_portfolio())
     update_task_status("sync_portfolio", result)
@@ -103,10 +103,10 @@ async def _sync_portfolio():
 
 
 @shared_task(name="check_stop_loss_orders")
-def check_stop_loss_orders_task():
+def check_stop_loss_orders_task(force=False):
     """Monitor stop-loss and take-profit order status. Runs every 1 minute."""
     from app.tasks.task_status import update_task_status, is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     result = _run_async(_check_stop_loss_orders())
     update_task_status("check_stop_loss_orders", result)
@@ -147,11 +147,11 @@ async def _check_stop_loss_orders():
 
 
 @shared_task(name="auto_execute_proposals")
-def auto_execute_proposals_task():
+def auto_execute_proposals_task(force=False):
     """When auto_execute is on, auto-approve proposed trades that pass risk checks.
     Runs every 1 minute."""
     from app.tasks.task_status import update_task_status, is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     result = _run_async(_auto_execute_proposals())
     update_task_status("auto_execute_proposals", result)

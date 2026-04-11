@@ -44,10 +44,10 @@ def _run_async(coro):
 # ── Price collection ─────────────────────────────────────────────────
 
 @celery_app.task(name="collect_prices", bind=True, max_retries=2)
-def collect_prices(self):
+def collect_prices(self, force=False):
     """Collect latest 1-min bars for watchlist stocks."""
     from app.tasks.task_status import is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     try:
         from app.collectors.alpaca_collector import AlpacaCollector
@@ -68,10 +68,10 @@ def collect_prices(self):
 
 
 @celery_app.task(name="collect_daily_bars", bind=True, max_retries=2)
-def collect_daily_bars(self):
+def collect_daily_bars(self, force=False):
     """Collect end-of-day bars after market close."""
     from app.tasks.task_status import is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     try:
         from app.collectors.alpaca_collector import AlpacaCollector
@@ -94,10 +94,10 @@ def collect_daily_bars(self):
 # ── News collection ──────────────────────────────────────────────────
 
 @celery_app.task(name="collect_news", bind=True, max_retries=2)
-def collect_news(self):
+def collect_news(self, force=False):
     """Collect news articles for watchlist stocks from Finnhub."""
     from app.tasks.task_status import is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     try:
         from app.collectors.finnhub_collector import FinnhubCollector
@@ -120,10 +120,10 @@ def collect_news(self):
 # ── Economic data ────────────────────────────────────────────────────
 
 @celery_app.task(name="collect_economic_data", bind=True, max_retries=2)
-def collect_economic_data(self):
+def collect_economic_data(self, force=False):
     """Collect economic indicators from FRED."""
     from app.tasks.task_status import is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     try:
         from app.collectors.fred_collector import FredCollector
@@ -146,10 +146,10 @@ def collect_economic_data(self):
 # ── SEC filings ──────────────────────────────────────────────────────
 
 @celery_app.task(name="collect_filings", bind=True, max_retries=2)
-def collect_filings(self):
+def collect_filings(self, force=False):
     """Collect SEC filings for watchlist stocks from EDGAR."""
     from app.tasks.task_status import is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     try:
         from app.collectors.edgar_collector import EdgarCollector

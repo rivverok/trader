@@ -30,14 +30,14 @@ def _run_async(coro):
 
 
 @celery_app.task(name="run_decision_cycle", bind=True, max_retries=1)
-def run_decision_cycle_task(self) -> dict:
+def run_decision_cycle_task(self, force=False) -> dict:
     """Aggregate signals → Claude decision → position sizing → risk check → propose trades.
 
     Runs every 30 minutes during market hours.
     """
     from datetime import datetime, timezone
     from app.tasks.task_status import is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
 
     logger.info("Starting decision cycle")

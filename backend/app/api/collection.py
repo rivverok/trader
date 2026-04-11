@@ -51,5 +51,5 @@ async def trigger_collection(task_name: str):
             f"Unknown task '{task_name}'. Available: {', '.join(tasks.keys())}",
         )
 
-    result = task_fn.delay()
+    result = task_fn.delay(force=True)
     return TriggerResponse(task_id=result.id, task_name=task_name)

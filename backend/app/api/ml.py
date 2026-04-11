@@ -191,7 +191,7 @@ async def trigger_retrain(body: RetrainRequest):
 @router.post("/models/generate-signals")
 async def trigger_generate_signals():
     """Trigger ML signal generation for all watchlist stocks."""
-    result = generate_ml_signals.delay()
+    result = generate_ml_signals.delay(force=True)
     return {"task_id": str(result.id), "status": "queued"}
 
 

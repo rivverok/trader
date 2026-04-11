@@ -40,10 +40,10 @@ def _run_async(coro):
 # ── News sentiment analysis ──────────────────────────────────────────
 
 @celery_app.task(name="analyze_news_sentiment", bind=True, max_retries=1)
-def analyze_news_sentiment(self):
+def analyze_news_sentiment(self, force=False):
     """Analyze pending news articles using Claude Haiku."""
     from app.tasks.task_status import is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     try:
         from app.analysis.sentiment import analyze_pending_news
@@ -65,10 +65,10 @@ def analyze_news_sentiment(self):
 # ── SEC filing analysis ──────────────────────────────────────────────
 
 @celery_app.task(name="analyze_filings", bind=True, max_retries=1)
-def analyze_filings(self):
+def analyze_filings(self, force=False):
     """Analyze pending SEC filings using Claude Sonnet."""
     from app.tasks.task_status import is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     try:
         from app.analysis.filings import analyze_pending_filings
@@ -90,10 +90,10 @@ def analyze_filings(self):
 # ── Context synthesis ────────────────────────────────────────────────
 
 @celery_app.task(name="run_context_synthesis", bind=True, max_retries=1)
-def run_context_synthesis(self):
+def run_context_synthesis(self, force=False):
     """Run holistic context synthesis for all watchlist stocks using Claude Sonnet."""
     from app.tasks.task_status import is_system_paused
-    if is_system_paused():
+    if not force and is_system_paused():
         return {"status": "system_paused"}
     try:
         from app.analysis.context_synthesis import run_context_synthesis as _synth
