@@ -691,7 +691,7 @@ export const api = {
     services: () => fetchApi<ServiceStatusResponse>("/status/services"),
   },
   tasks: {
-    list: () => fetchApi<TaskListResponse>("/tasks/"),
+    list: () => fetchApi<TaskListResponse>("/tasks"),
     get: (taskId: string) => fetchApi<TaskInfo>(`/tasks/${taskId}`),
     cancel: (taskId: string) =>
       fetchApi<TaskActionResponse>(`/tasks/${taskId}/cancel`, { method: "POST" }),

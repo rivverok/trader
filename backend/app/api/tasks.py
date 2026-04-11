@@ -76,7 +76,7 @@ class DataStatusResponse(BaseModel):
     sources: list[DataSourceStatus]
 
 
-@router.get("/", response_model=TaskListResponse)
+@router.get("", response_model=TaskListResponse)
 async def list_tasks():
     """List all active, reserved (queued), and periodic tasks."""
     loop = asyncio.get_event_loop()
