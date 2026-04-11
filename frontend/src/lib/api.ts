@@ -194,7 +194,7 @@ export interface ProposedTradeItem {
   reasoning_chain: string | null;
   risk_check_passed: boolean | null;
   risk_check_reason: string | null;
-  status: "proposed" | "approved" | "rejected" | "executed";
+  status: "proposed" | "queued" | "approved" | "rejected" | "executed" | "expired";
   created_at: string;
 }
 
@@ -585,8 +585,8 @@ export const api = {
       fetchApi<{ task_id: string }>("/trades/run-decision-cycle", {
         method: "POST",
       }),
-    reevaluateRejected: () =>
-      fetchApi<{ task_id: string }>("/trades/reevaluate-rejected", {
+    reevaluateQueued: () =>
+      fetchApi<{ task_id: string }>("/trades/reevaluate-queued", {
         method: "POST",
       }),
   },

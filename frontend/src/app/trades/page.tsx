@@ -19,9 +19,11 @@ import {
 function statusBadge(status: string) {
   const colors: Record<string, string> = {
     proposed: "bg-blue-500/10 text-blue-500",
+    queued: "bg-yellow-500/10 text-yellow-500",
     approved: "bg-green-500/10 text-green-500",
     rejected: "bg-red-500/10 text-red-500",
     executed: "bg-purple-500/10 text-purple-500",
+    expired: "bg-muted text-muted-foreground",
   };
   return (
     <span
@@ -209,6 +211,7 @@ export default function TradesPage() {
             {[
               { label: "All", value: undefined },
               { label: `Proposed (${proposedCount})`, value: "proposed" },
+              { label: "Queued", value: "queued" },
               { label: "Approved", value: "approved" },
               { label: "Rejected", value: "rejected" },
               { label: "Executed", value: "executed" },
@@ -228,12 +231,12 @@ export default function TradesPage() {
                 variant="outline"
                 onClick={async () => {
                   try {
-                    await api.trades.reevaluateRejected();
+                    await api.trades.reevaluateQueued();
                     setTimeout(() => loadData(), 3000);
                   } catch { /* empty */ }
                 }}
               >
-                Re-evaluate Rejected
+                Re-evaluate Queued
               </Button>
             </div>
           </div>
@@ -286,7 +289,7 @@ export default function TradesPage() {
                               {(t.confidence * 100).toFixed(0)}%
                             </span>
                           </div>
-                          {t.status === "proposed" && (
+                          {(t.status === "proposed" || t.status === "queued") && (
                             <>
                               <Button
                                 size="sm"
@@ -303,13 +306,13 @@ export default function TradesPage() {
                               </Button>
                             </>
                           )}
-                          {t.status === "rejected" && (
+                          {t.status === "queued" && (
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => handleReevaluate(t.id)}
                             >
-                              Re-evaluate
+                              Re-check
                             </Button>
                           )}
                           <Button

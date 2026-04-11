@@ -192,22 +192,22 @@ async def _auto_execute_proposals():
         return {"status": "ok", "approved": approved_count}
 
 
-@shared_task(name="reevaluate_rejected_proposals")
-def reevaluate_rejected_proposals_task(force=False):
-    """Re-check rejected proposals — promote to 'proposed' if they now pass risk.
+@shared_task(name="reevaluate_queued_proposals")
+def reevaluate_queued_proposals_task(force=False):
+    """Re-check queued proposals — promote to 'proposed' if they now pass risk.
 
     Runs at market open. Catches proposals blocked by transient conditions
-    (market closed, daily loss limit that reset, etc.).
+    (daily loss limit that reset, confidence threshold changes, etc.).
     """
     from app.tasks.task_status import update_task_status, is_system_paused
     if not force and is_system_paused():
         return {"status": "system_paused"}
-    result = _run_async(_reevaluate_rejected_proposals())
-    update_task_status("reevaluate_rejected_proposals", result)
+    result = _run_async(_reevaluate_queued_proposals())
+    update_task_status("reevaluate_queued_proposals", result)
     return result
 
 
-async def _reevaluate_rejected_proposals():
+async def _reevaluate_queued_proposals():
     async with async_session() as db:
         state = await get_risk_state(db)
         if state.trading_halted:
@@ -220,25 +220,36 @@ async def _reevaluate_rejected_proposals():
         snap = snap_result.scalar_one_or_none()
         portfolio_value = snap.total_value if snap else state.max_trade_dollars * 100
 
-        # Find rejected proposals from the last 48 hours
+        # Find queued proposals from the last 48 hours
         cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
         result = await db.execute(
             select(ProposedTrade, Stock)
             .join(Stock, Stock.id == ProposedTrade.stock_id)
             .where(
-                ProposedTrade.status == "rejected",
+                ProposedTrade.status == "queued",
                 ProposedTrade.created_at >= cutoff,
             )
             .order_by(ProposedTrade.created_at)
         )
-        rejected = result.all()
+        queued = result.all()
 
-        if not rejected:
-            return {"status": "ok", "promoted": 0, "still_blocked": 0}
+        if not queued:
+            return {"status": "ok", "promoted": 0, "still_queued": 0}
+
+        # Expire old queued proposals (>48h)
+        expire_result = await db.execute(
+            select(ProposedTrade).where(
+                ProposedTrade.status == "queued",
+                ProposedTrade.created_at < cutoff,
+            )
+        )
+        for old in expire_result.scalars().all():
+            old.status = "expired"
+            old.updated_at = datetime.now(timezone.utc)
 
         promoted = 0
-        still_blocked = 0
-        for proposed, stock in rejected:
+        still_queued = 0
+        for proposed, stock in queued:
             # Use price_target if set (limit orders), otherwise look up latest price
             price = proposed.price_target
             if not price or price <= 0:
@@ -251,7 +262,7 @@ async def _reevaluate_rejected_proposals():
                 price = price_result.scalar() or 0.0
 
             if price <= 0:
-                still_blocked += 1
+                still_queued += 1
                 continue
 
             allowed, reason = await check_trade_allowed(
@@ -270,15 +281,15 @@ async def _reevaluate_rejected_proposals():
                 proposed.updated_at = datetime.now(timezone.utc)
                 promoted += 1
                 logger.info(
-                    "Promoted rejected proposal #%d (%s %s) — was: %s",
+                    "Promoted queued proposal #%d (%s %s) — was: %s",
                     proposed.id, proposed.action, stock.symbol,
                     proposed.risk_check_reason,
                 )
             else:
-                still_blocked += 1
+                still_queued += 1
 
         if promoted > 0:
             await db.commit()
-        logger.info("Re-evaluated %d rejected: %d promoted, %d still blocked",
-                     len(rejected), promoted, still_blocked)
-        return {"status": "ok", "promoted": promoted, "still_blocked": still_blocked}
+        logger.info("Re-evaluated %d queued: %d promoted, %d still queued",
+                     len(queued), promoted, still_queued)
+        return {"status": "ok", "promoted": promoted, "still_queued": still_queued}

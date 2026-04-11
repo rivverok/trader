@@ -64,7 +64,8 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
 
     proposed = 0
     skipped = 0
-    blocked = 0
+    queued = 0
+    updated = 0
     errors = 0
     details: list[dict[str, Any]] = []
 
@@ -123,30 +124,67 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
                 portfolio_value=portfolio_value,
             )
 
-            # Create proposal
-            trade = ProposedTrade(
-                stock_id=stock.id,
-                action=action,
-                shares=shares,
-                price_target=decision.get("price_target"),
-                order_type=decision.get("order_type", "market"),
-                ml_signal_id=pkg.ml_signal.id if pkg.ml_signal else None,
-                synthesis_id=pkg.synthesis.id if pkg.synthesis else None,
-                analyst_input_id=pkg.analyst_input.id if pkg.analyst_input else None,
-                confidence=decision.get("confidence", pkg.combined_confidence),
-                reasoning_chain=decision.get("reasoning", ""),
-                risk_check_passed=allowed,
-                risk_check_reason=reason,
-                status="proposed" if allowed else "rejected",
+            new_status = "proposed" if allowed else "queued"
+            conf = decision.get("confidence", pkg.combined_confidence)
+
+            # Check for existing active proposal for this stock
+            existing_result = await db.execute(
+                select(ProposedTrade)
+                .where(
+                    ProposedTrade.stock_id == stock.id,
+                    ProposedTrade.status.in_(["proposed", "queued", "approved"]),
+                )
+                .order_by(desc(ProposedTrade.created_at))
+                .limit(1)
             )
-            db.add(trade)
-            if allowed:
-                proposed += 1
-                details.append({"symbol": stock.symbol, "outcome": "proposed", "action": action, "shares": shares, "price": price, "confidence": decision.get("confidence", pkg.combined_confidence)})
+            existing = existing_result.scalar_one_or_none()
+
+            if existing:
+                # Update existing proposal with fresh analysis
+                existing.action = action
+                existing.shares = shares
+                existing.price_target = decision.get("price_target")
+                existing.order_type = decision.get("order_type", "market")
+                existing.ml_signal_id = pkg.ml_signal.id if pkg.ml_signal else None
+                existing.synthesis_id = pkg.synthesis.id if pkg.synthesis else None
+                existing.analyst_input_id = pkg.analyst_input.id if pkg.analyst_input else None
+                existing.confidence = conf
+                existing.reasoning_chain = decision.get("reasoning", "")
+                existing.risk_check_passed = allowed
+                existing.risk_check_reason = reason
+                # Promote queued→proposed if now allowed, but don't demote approved
+                if existing.status == "queued" and allowed:
+                    existing.status = "proposed"
+                elif existing.status != "approved":
+                    existing.status = new_status
+                existing.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+                updated += 1
+                details.append({"symbol": stock.symbol, "outcome": "updated", "action": action, "status": existing.status, "shares": shares, "price": price, "confidence": conf})
             else:
-                blocked += 1
-                details.append({"symbol": stock.symbol, "outcome": "blocked", "action": action, "reason": reason})
-                logger.info("%s: blocked — %s", stock.symbol, reason)
+                # Create new proposal
+                trade = ProposedTrade(
+                    stock_id=stock.id,
+                    action=action,
+                    shares=shares,
+                    price_target=decision.get("price_target"),
+                    order_type=decision.get("order_type", "market"),
+                    ml_signal_id=pkg.ml_signal.id if pkg.ml_signal else None,
+                    synthesis_id=pkg.synthesis.id if pkg.synthesis else None,
+                    analyst_input_id=pkg.analyst_input.id if pkg.analyst_input else None,
+                    confidence=conf,
+                    reasoning_chain=decision.get("reasoning", ""),
+                    risk_check_passed=allowed,
+                    risk_check_reason=reason,
+                    status=new_status,
+                )
+                db.add(trade)
+                if allowed:
+                    proposed += 1
+                    details.append({"symbol": stock.symbol, "outcome": "proposed", "action": action, "shares": shares, "price": price, "confidence": conf})
+                else:
+                    queued += 1
+                    details.append({"symbol": stock.symbol, "outcome": "queued", "action": action, "reason": reason})
+                    logger.info("%s: queued — %s", stock.symbol, reason)
 
         except Exception as e:
             logger.error("Decision cycle error for %s: %s", stock.symbol, e)
@@ -158,7 +196,8 @@ async def run_decision_cycle(db: AsyncSession) -> dict[str, Any]:
         "status": "ok",
         "proposed": proposed,
         "skipped": skipped,
-        "blocked": blocked,
+        "queued": queued,
+        "updated": updated,
         "errors": errors,
         "details": details,
     }

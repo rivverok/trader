@@ -24,7 +24,7 @@ class ProposedTrade(TimestampMixin, Base):
     reasoning_chain: Mapped[str | None] = mapped_column(Text, nullable=True)
     risk_check_passed: Mapped[bool | None] = mapped_column(nullable=True)
     risk_check_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="proposed")  # proposed, approved, rejected, executed
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="proposed")  # proposed, queued, approved, rejected, executed, expired
 
 
 class Trade(TimestampMixin, Base):

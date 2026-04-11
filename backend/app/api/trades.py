@@ -22,11 +22,11 @@ async def trigger_decision_cycle():
     return {"task_id": str(result.id), "status": "queued"}
 
 
-@router.post("/reevaluate-rejected")
-async def trigger_reevaluate_rejected():
-    """Re-run risk checks on all rejected proposals from last 48h."""
-    from app.tasks.execution_tasks import reevaluate_rejected_proposals_task
-    result = reevaluate_rejected_proposals_task.delay(force=True)
+@router.post("/reevaluate-queued")
+async def trigger_reevaluate_queued():
+    """Re-run risk checks on all queued proposals from last 48h."""
+    from app.tasks.execution_tasks import reevaluate_queued_proposals_task
+    result = reevaluate_queued_proposals_task.delay(force=True)
     return {"task_id": str(result.id), "status": "queued"}
 
 
@@ -94,8 +94,8 @@ async def approve_trade(
     trade = result.scalar_one_or_none()
     if not trade:
         raise HTTPException(404, detail="Trade not found")
-    if trade.status != "proposed":
-        raise HTTPException(400, detail=f"Trade is already {trade.status}")
+    if trade.status not in ("proposed", "queued"):
+        raise HTTPException(400, detail=f"Trade is {trade.status}, can only approve proposed or queued")
 
     trade.status = "approved"
     trade.updated_at = datetime.now(timezone.utc)
@@ -116,7 +116,7 @@ async def reject_trade(
     trade = result.scalar_one_or_none()
     if not trade:
         raise HTTPException(404, detail="Trade not found")
-    if trade.status not in ("proposed", "approved"):
+    if trade.status not in ("proposed", "approved", "queued"):
         raise HTTPException(400, detail=f"Trade is already {trade.status}")
 
     trade.status = "rejected"
@@ -171,7 +171,7 @@ async def reevaluate_trade(
 
     trade.risk_check_passed = allowed
     trade.risk_check_reason = reason
-    trade.status = "proposed" if allowed else "rejected"
+    trade.status = "proposed" if allowed else "queued"
     trade.updated_at = datetime.now(timezone.utc)
     await db.commit()
 
