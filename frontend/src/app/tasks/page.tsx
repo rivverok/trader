@@ -125,8 +125,17 @@ function formatSchedule(raw: string): string {
         const startAP = start < 12 ? "AM" : "PM";
         const endAP = end < 12 ? "AM" : "PM";
         if (everyMinute) return `every minute, ${startFmt}${startAP}–${endFmt}${endAP}`;
-        const minLabel = mins === "0" ? "" : mins.includes(",") ? ` at :${mins}` : ` at :${mins.padStart(2, "0")}`;
         if (mins.includes("*/")) return `every ${mins.replace("*/", "")} min, ${startFmt}${startAP}–${endFmt}${endAP}`;
+        if (mins.includes(",")) {
+          const minNums = mins.split(",").map(Number).sort((a, b) => a - b);
+          if (minNums.length >= 2 && minNums[0] === 0) {
+            const gap = minNums[1] - minNums[0];
+            if (minNums.every((v, i) => v === i * gap)) {
+              return `every ${gap} min, ${startFmt}${startAP}–${endFmt}${endAP}`;
+            }
+          }
+        }
+        const minLabel = mins === "0" ? "" : mins.includes(",") ? ` at :${mins}` : ` at :${mins.padStart(2, "0")}`;
         return `${startFmt}${startAP}–${endFmt}${endAP}${minLabel}`;
       }
       const h = Number(hours);
