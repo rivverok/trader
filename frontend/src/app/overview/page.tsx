@@ -250,7 +250,6 @@ export default function OverviewPage() {
                   : "green"
               }
             />
-            {systemStatus.auto_execute && <StatusPill label="Auto-Execute" color="blue" />}
             {systemStatus.system_mode === "data_collection" && <StatusPill label="Data Collection" color="blue" />}
             {systemStatus.system_mode === "trading" && <StatusPill label="RL Trading" color="purple" />}
             {systemStatus.system_paused && <StatusPill label="System Paused" color="yellow" />}
