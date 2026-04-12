@@ -13,6 +13,7 @@ from app.models.ml import BacktestResult, ModelRegistry
 from app.models.risk import RiskState
 from app.models.alert import Alert
 from app.models.discovery import WatchlistHint, DiscoveryLog
+from app.models.system_kv import SystemKV
 
 __all__ = [
     "TimestampMixin",
@@ -37,4 +38,5 @@ __all__ = [
     "Alert",
     "WatchlistHint",
     "DiscoveryLog",
+    "SystemKV",
 ]

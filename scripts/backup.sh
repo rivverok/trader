@@ -1,68 +1,99 @@
 #!/usr/bin/env bash
-# backup.sh — Dump PostgreSQL data + copy .env into a timestamped backup folder
-# Usage:  ./scripts/backup.sh                       (creates backups/backup-YYYYMMDD-HHmmss/)
-#         ./scripts/backup.sh /mnt/external/backups  (custom output directory)
-
+# ──────────────────────────────────────────────────────────────
+# backup.sh — Dump PostgreSQL database to USB drive
+#
+# Runs via cron. Writes status to the database so the app can
+# display backup health on the config page.
+#
+# Usage:
+#   bash scripts/backup.sh
+#
+# Requires:
+#   BACKUP_DIR env var or /mnt/backup/trader_bkups default
+#
+# Cron example (daily at 2 AM):
+#   0 2 * * * cd /opt/trader/trader && bash scripts/backup.sh >> /var/log/trader-backup.log 2>&1
+# ──────────────────────────────────────────────────────────────
 set -euo pipefail
 
-OUT_DIR="${1:-./backups}"
-TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-BACKUP_DIR="$OUT_DIR/backup-$TIMESTAMP"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_DIR"
 
-echo "=== AI Trader Backup ==="
-echo "Destination: $BACKUP_DIR"
+BACKUP_DIR="${BACKUP_DIR:-/mnt/backup/trader_bkups}"
+RETAIN_DAYS=30
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+FILENAME="trader_${TIMESTAMP}.sql.gz"
 
-# Create backup directory
-mkdir -p "$BACKUP_DIR"
+# Helper: write backup status to the database
+write_status() {
+  local status="$1"   # success | error
+  local message="$2"
+  local now
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# 1. PostgreSQL dump via the running container
-echo ""
-echo "[1/3] Dumping PostgreSQL database..."
-docker compose exec -T postgres pg_dump -U trader -d trader --format=custom --compress=6 > "$BACKUP_DIR/trader.dump"
-DUMP_SIZE=$(stat -c%s "$BACKUP_DIR/trader.dump" 2>/dev/null || stat -f%z "$BACKUP_DIR/trader.dump")
-if [ "$DUMP_SIZE" -eq 0 ]; then
-    rm -rf "$BACKUP_DIR"
-    echo "ERROR: Database dump is empty (0 bytes). Are the containers running? Check with: docker compose ps" >&2
-    exit 1
-fi
-echo "       Database dump: $(du -h "$BACKUP_DIR/trader.dump" | cut -f1)"
-
-# 2. Copy .env (contains API keys and secrets)
-echo "[2/3] Copying .env..."
-if [ -f ".env" ]; then
-    cp .env "$BACKUP_DIR/.env"
-    echo "       .env copied"
-else
-    echo "       WARNING: .env not found"
-fi
-
-# 3. Summary with row counts
-echo "[3/3] Verifying backup..."
-COUNTS=$(docker compose exec -T postgres psql -U trader -d trader -t -A -c "
-SELECT 'stocks: '          || COUNT(*) FROM stocks
-UNION ALL SELECT 'articles: '        || COUNT(*) FROM news_articles
-UNION ALL SELECT 'filings: '         || COUNT(*) FROM sec_filings
-UNION ALL SELECT 'filing_analyses: ' || COUNT(*) FROM filing_analyses
-UNION ALL SELECT 'alerts: '          || COUNT(*) FROM alerts
-UNION ALL SELECT 'claude_usage: '    || COUNT(*) FROM claude_usage;
-")
-
-echo ""
-echo "  Row counts at backup time:"
-echo "$COUNTS" | while IFS= read -r line; do
-    echo "    $line"
-done
-
-# Write manifest
-cat > "$BACKUP_DIR/manifest.json" <<EOF
-{
-  "timestamp": "$TIMESTAMP",
-  "postgres_dump": "trader.dump",
-  "env_file": ".env",
-  "row_counts": $(echo "$COUNTS" | jq -R -s 'split("\n") | map(select(length > 0))')
+  docker compose exec -T postgres psql -U "${POSTGRES_USER:-trader}" "${POSTGRES_DB:-trader}" -q <<SQL
+INSERT INTO system_kv (key, value, updated_at)
+VALUES
+  ('backup_last_status', '${status}', NOW()),
+  ('backup_last_time', '${now}', NOW()),
+  ('backup_last_message', '${message}', NOW())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
+SQL
 }
-EOF
 
-echo ""
-echo "=== Backup complete: $BACKUP_DIR ==="
-echo "Copy this folder to another machine to restore."
+# Source .env if it exists (for POSTGRES_USER, POSTGRES_DB, BACKUP_DIR overrides)
+if [ -f "$PROJECT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$PROJECT_DIR/.env"
+  set +a
+fi
+
+# Re-apply default after sourcing .env (in case BACKUP_DIR was set there)
+BACKUP_DIR="${BACKUP_DIR:-/mnt/backup/trader_bkups}"
+
+# Check if backup directory is accessible
+if [ ! -d "$BACKUP_DIR" ]; then
+  mkdir -p "$BACKUP_DIR" 2>/dev/null || true
+fi
+
+if [ ! -d "$BACKUP_DIR" ] || [ ! -w "$BACKUP_DIR" ]; then
+  echo "$(date): Backup directory $BACKUP_DIR not accessible (USB drive not mounted?). Skipping."
+  write_status "error" "Backup drive not accessible at ${BACKUP_DIR}" || true
+  exit 0
+fi
+
+# Check if database is running
+if ! docker compose exec -T postgres pg_isready -U "${POSTGRES_USER:-trader}" -q 2>/dev/null; then
+  echo "$(date): Database is not running. Skipping backup."
+  write_status "error" "Database not running" || true
+  exit 0
+fi
+
+# Run the dump
+echo "$(date): Starting backup to ${BACKUP_DIR}/${FILENAME}..."
+if docker compose exec -T postgres pg_dump -U "${POSTGRES_USER:-trader}" "${POSTGRES_DB:-trader}" | gzip > "${BACKUP_DIR}/${FILENAME}"; then
+  # Verify the file isn't empty
+  if [ -s "${BACKUP_DIR}/${FILENAME}" ]; then
+    SIZE=$(du -h "${BACKUP_DIR}/${FILENAME}" | cut -f1)
+    echo "$(date): Backup complete — ${FILENAME} (${SIZE})"
+    write_status "success" "Backup ${FILENAME} (${SIZE})"
+  else
+    rm -f "${BACKUP_DIR}/${FILENAME}"
+    echo "$(date): Backup file was empty. Removed."
+    write_status "error" "Backup produced empty file"
+    exit 0
+  fi
+else
+  rm -f "${BACKUP_DIR}/${FILENAME}"
+  echo "$(date): pg_dump failed."
+  write_status "error" "pg_dump failed"
+  exit 0
+fi
+
+# Prune old backups
+echo "$(date): Pruning backups older than ${RETAIN_DAYS} days..."
+find "$BACKUP_DIR" -name "trader_*.sql.gz" -mtime +${RETAIN_DAYS} -delete 2>/dev/null || true
+
+COUNT=$(find "$BACKUP_DIR" -name "trader_*.sql.gz" | wc -l)
+echo "$(date): ${COUNT} backup(s) on disk."

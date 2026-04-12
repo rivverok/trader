@@ -1,6 +1,11 @@
-# backup.ps1 — Dump PostgreSQL data + copy .env into a timestamped backup folder
-# Usage:  .\scripts\backup.ps1              (creates backups\backup-YYYYMMDD-HHmmss\)
-#         .\scripts\backup.ps1 -OutDir D:\  (creates D:\backup-YYYYMMDD-HHmmss\)
+# backup.ps1 — Dump PostgreSQL database to USB/external drive
+#
+# Runs via Task Scheduler or manually. Writes status to the database
+# so the app can display backup health on the config page.
+#
+# Usage:
+#   .\scripts\backup.ps1                     (saves to .\backups\)
+#   .\scripts\backup.ps1 -OutDir E:\backups  (saves to USB drive)
 
 param(
     [string]$OutDir = ".\backups"
@@ -8,59 +13,64 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$backupDir = Join-Path $OutDir "backup-$timestamp"
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$filename = "trader_${timestamp}.sql.gz"
+$retainDays = 30
 
 Write-Host "=== AI Trader Backup ===" -ForegroundColor Cyan
-Write-Host "Destination: $backupDir"
+Write-Host "Destination: $OutDir\$filename"
 
 # Create backup directory
-New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 
-# 1. PostgreSQL dump via the running container
-Write-Host "`n[1/3] Dumping PostgreSQL database..." -ForegroundColor Yellow
-$dumpPath = Join-Path $backupDir "trader.dump"
-# Use cmd /c to avoid PowerShell's UTF-16 encoding corruption of binary data
-cmd /c "docker compose exec -T postgres pg_dump -U trader -d trader --format=custom --compress=6 > `"$dumpPath`""
-
-$dumpSize = (Get-Item (Join-Path $backupDir "trader.dump")).Length
-if ($dumpSize -eq 0) {
-    Remove-Item -Recurse -Force $backupDir
-    throw "ERROR: Database dump is empty (0 bytes). Are the containers running? Check with: docker compose ps"
-}
-Write-Host "       Database dump: $([math]::Round($dumpSize / 1MB, 1)) MB"
-
-# 2. Copy .env (contains API keys and secrets)
-Write-Host "[2/3] Copying .env..." -ForegroundColor Yellow
-if (Test-Path ".env") {
-    Copy-Item ".env" (Join-Path $backupDir ".env")
-    Write-Host "       .env copied"
-} else {
-    Write-Host "       WARNING: .env not found" -ForegroundColor Red
-}
-
-# 3. Summary with row counts
-Write-Host "[3/3] Verifying backup..." -ForegroundColor Yellow
-$counts = docker compose exec -T postgres psql -U trader -d trader -t -A -c @"
-SELECT 'stocks: '            || COUNT(*) FROM stocks
-UNION ALL SELECT 'articles: '          || COUNT(*) FROM news_articles
-UNION ALL SELECT 'filings: '           || COUNT(*) FROM sec_filings
-UNION ALL SELECT 'filing_analyses: '   || COUNT(*) FROM filing_analyses
-UNION ALL SELECT 'alerts: '            || COUNT(*) FROM alerts
-UNION ALL SELECT 'claude_usage: '      || COUNT(*) FROM claude_usage;
+# Helper: write backup status to the database
+function Write-BackupStatus {
+    param([string]$Status, [string]$Message)
+    $now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $sql = @"
+INSERT INTO system_kv (key, value, updated_at) VALUES
+  ('backup_last_status', '$Status', NOW()),
+  ('backup_last_time', '$now', NOW()),
+  ('backup_last_message', '$Message', NOW())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
 "@
-
-Write-Host "`n  Row counts at backup time:" -ForegroundColor Gray
-$counts | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
-
-# Write manifest
-$manifest = @{
-    timestamp = $timestamp
-    postgres_dump = "trader.dump"
-    env_file = ".env"
-    row_counts = $counts
+    docker compose exec -T postgres psql -U trader -d trader -q -c "$sql" 2>$null
 }
-$manifest | ConvertTo-Json | Set-Content (Join-Path $backupDir "manifest.json")
 
-Write-Host "`n=== Backup complete: $backupDir ===" -ForegroundColor Green
-Write-Host "Copy this folder to the new PC to restore."
+# Check if database is running
+$pgReady = docker compose exec -T postgres pg_isready -U trader 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Database is not running." -ForegroundColor Red
+    Write-BackupStatus "error" "Database not running"
+    exit 0
+}
+
+# Run the dump (pipe through gzip inside the container)
+Write-Host "`n[1/2] Dumping PostgreSQL database..." -ForegroundColor Yellow
+$dumpPath = Join-Path $OutDir $filename
+cmd /c "docker compose exec -T postgres bash -c `"pg_dump -U trader trader | gzip`" > `"$dumpPath`""
+
+$dumpSize = (Get-Item $dumpPath).Length
+if ($dumpSize -eq 0) {
+    Remove-Item -Force $dumpPath
+    Write-Host "ERROR: Database dump is empty (0 bytes)." -ForegroundColor Red
+    Write-BackupStatus "error" "Backup produced empty file"
+    exit 0
+}
+
+$sizeMB = [math]::Round($dumpSize / 1MB, 1)
+Write-Host "       Database dump: ${sizeMB} MB"
+Write-BackupStatus "success" "Backup ${filename} (${sizeMB}MB)"
+
+# Prune old backups
+Write-Host "[2/2] Pruning backups older than $retainDays days..." -ForegroundColor Yellow
+$cutoff = (Get-Date).AddDays(-$retainDays)
+$old = Get-ChildItem -Path $OutDir -Filter "trader_*.sql.gz" -ErrorAction SilentlyContinue |
+       Where-Object { $_.LastWriteTime -lt $cutoff }
+if ($old) {
+    $old | Remove-Item -Force
+    Write-Host "       Removed $($old.Count) old backup(s)"
+}
+
+$remaining = (Get-ChildItem -Path $OutDir -Filter "trader_*.sql.gz" -ErrorAction SilentlyContinue).Count
+Write-Host "`n=== Backup complete: $remaining backup(s) on disk ===" -ForegroundColor Green

@@ -227,3 +227,22 @@ async def manual_trade(
         risk_check_passed=True,
         risk_check_reason="ok",
     )
+
+
+# ── Backup status ────────────────────────────────────────────────────
+
+
+@router.get("/backup-status")
+async def get_backup_status(db: AsyncSession = Depends(get_db)):
+    """Return last backup status written by the backup cron script."""
+    from app.models.system_kv import SystemKV
+
+    keys = ["backup_last_status", "backup_last_time", "backup_last_message"]
+    result = await db.execute(select(SystemKV).where(SystemKV.key.in_(keys)))
+    rows = {row.key: row.value for row in result.scalars().all()}
+
+    return {
+        "status": rows.get("backup_last_status"),
+        "time": rows.get("backup_last_time"),
+        "message": rows.get("backup_last_message"),
+    }

@@ -292,6 +292,12 @@ export interface ManualTradeResponse {
   risk_check_reason: string;
 }
 
+export interface BackupStatus {
+  status: string | null;
+  time: string | null;
+  message: string | null;
+}
+
 // ── Analytics types ─────────────────────────────────────────────────
 
 export interface PerformanceMetrics {
@@ -659,6 +665,8 @@ export const api = {
         method: "POST",
         body: JSON.stringify(trade),
       }),
+    backupStatus: () =>
+      fetchApi<BackupStatus>("/system/backup-status"),
   },
   analytics: {
     performance: () =>

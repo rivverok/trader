@@ -9,12 +9,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, type RiskStatus, type SignalWeights, type SystemStatus } from "@/lib/api";
+import { api, type RiskStatus, type SignalWeights, type SystemStatus, type BackupStatus } from "@/lib/api";
 
 export default function ConfigPage() {
   const [risk, setRisk] = useState<RiskStatus | null>(null);
   const [weights, setWeights] = useState<SignalWeights | null>(null);
   const [system, setSystem] = useState<SystemStatus | null>(null);
+  const [backup, setBackup] = useState<BackupStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Editable risk config
@@ -46,6 +47,8 @@ export default function ConfigPage() {
         setRisk(r);
         setWeights(w);
         setSystem(s);
+
+        api.system.backupStatus().then(setBackup).catch(() => {});
         setRiskForm({
           max_trade_dollars: r.max_trade_dollars,
           max_position_pct: r.max_position_pct,
@@ -474,6 +477,56 @@ export default function ConfigPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Backup Status ── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Database Backups</CardTitle>
+          <CardDescription>
+            Automatic daily backups to USB drive. Managed by cron on the server.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {backup?.status ? (
+            <div className="flex items-center gap-3">
+              <div
+                className={`h-3 w-3 rounded-full ${
+                  backup.status === "success" ? "bg-green-500" : "bg-red-500"
+                }`}
+              />
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">
+                    Last backup:{" "}
+                    {backup.time
+                      ? new Date(backup.time).toLocaleString()
+                      : "Unknown"}
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase ${
+                      backup.status === "success"
+                        ? "bg-green-500/10 text-green-500"
+                        : "bg-red-500/10 text-red-500"
+                    }`}
+                  >
+                    {backup.status}
+                  </span>
+                </div>
+                {backup.message && (
+                  <p className="text-sm text-muted-foreground">
+                    {backup.message}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No backup has run yet. Set up the cron job on the server to enable
+              automatic backups.
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
