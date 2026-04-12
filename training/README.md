@@ -1,12 +1,12 @@
 # RL Trading Agent — Training Guide
 
-Train a reinforcement learning agent on historical market data exported from the trading platform, then deploy the trained model back to the server for live inference.
+Train a reinforcement learning agent on historical market data pulled from the trading platform's API, then deploy the trained model back to the server for live inference.
 
 ## Prerequisites
 
 - Python 3.11+
 - GPU recommended (but not required for small datasets)
-- Exported training data from the server (Parquet files)
+- Network access to the trading server API
 
 ## Setup
 
@@ -25,21 +25,33 @@ pip install -r requirements-rl.txt
 
 ## End-to-End Workflow
 
-### 1. Export data from server
+### 1. Pull data from server API
 
-```bash
-# Option A: API export
-curl -o snapshots.parquet "https://your-server/api/data-collection/export?format=parquet"
+The server exposes training data APIs that query source tables directly — no snapshots, no copies. Your training code calls these endpoints with time-range filters:
 
-# Option B: Run export script on server
-cd backend && python -m scripts.export_rl_data --output ./data/exported
+```
+GET /api/training/catalog                     — available stocks, date ranges, row counts
+GET /api/training/prices?symbols=...&start=...&end=...     — OHLCV bars
+GET /api/training/signals?symbols=...&start=...&end=...    — ML model signals
+GET /api/training/sentiment?symbols=...&start=...&end=...  — news sentiment scores
+GET /api/training/synthesis?symbols=...&start=...&end=...  — context synthesis
+GET /api/training/economic?start=...&end=...               — macro indicators (FRED)
+GET /api/training/portfolio?start=...&end=...              — portfolio history
+GET /api/training/trades?start=...&end=...                 — executed trades
 ```
 
-Transfer the exported directory to the training machine. It should contain:
-- `states.parquet` — per-stock features indexed by (date, symbol)
-- `portfolio.parquet` — portfolio features indexed by date
-- `market.parquet` — market features indexed by date
-- `metadata.json` — feature names, normalization params, date range
+Example:
+
+```bash
+# Check what data is available
+curl "https://your-server/api/training/catalog"
+
+# Pull daily prices for AAPL and MSFT
+curl "https://your-server/api/training/prices?symbols=AAPL,MSFT&start=2024-01-01&end=2026-04-12&interval=1Day"
+
+# Pull all economic indicators
+curl "https://your-server/api/training/economic?start=2024-01-01&end=2026-04-12"
+```
 
 ### 2. Train the agent
 
@@ -101,7 +113,7 @@ curl -X PUT "https://your-server/api/system/mode" \
 
 | File | Purpose |
 |------|---------|
-| `rl_environment.py` | Gymnasium environment — replays exported snapshots |
+| `rl_environment.py` | Gymnasium environment — replays historical data |
 | `train_rl_agent.py` | Training script — PPO/A2C + ONNX export |
 | `requirements-rl.txt` | Python dependencies for training |
 | `train_technical_model.py` | Legacy ML model training (XGBoost/LightGBM) |
@@ -112,13 +124,12 @@ curl -X PUT "https://your-server/api/system/mode" \
 - **Training** happens on a GPU machine with PyTorch + stable-baselines3
 - **Inference** runs on the server with only `onnxruntime` (no PyTorch needed)
 - ONNX is the deployment format — framework-agnostic, fast C++ runtime
-- The environment replays historical snapshots offline (no live data during training)
+- The environment replays historical data offline (pulled from server API before training)
 - State vector: portfolio features + market features + per-stock features (concatenated)
 - Action space: MultiDiscrete — one discrete action per stock (hold/buy_small/buy_large/sell_small/sell_all)
 
 ## Iterating
 
 1. Collect more data: leave the server in `data_collection` mode
-2. Re-export: `python -m scripts.export_rl_data --output ./data/exported`
-3. Retrain: `python train_rl_agent.py --data ./data/exported`
-4. Upload new model version, activate, compare performance
+2. Retrain: `python train_rl_agent.py --data ./data` (pull fresh data via API)
+3. Upload new model version, activate, compare performance

@@ -181,8 +181,8 @@ export default function TradesPage() {
         <div className="rounded-lg border border-blue-500/50 bg-blue-500/10 p-4">
           <h3 className="font-semibold text-blue-400">Data Collection Mode</h3>
           <p className="text-sm text-blue-300">
-            Trading is disabled. The system is collecting data and capturing state
-            snapshots for RL training. Switch to trading mode on the Configuration
+            Trading is disabled. The system is collecting data and generating signals
+            for RL training. Switch to trading mode on the Configuration
             page when an RL model is loaded.
           </p>
         </div>

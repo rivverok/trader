@@ -274,7 +274,6 @@ async def set_system_mode(
 
     if req.mode == "trading":
         # Verify an active RL model exists
-        from app.models.rl_snapshot import RLStateSnapshot  # noqa: F401
         from app.models.rl_model import RLModel
         result = await db.execute(
             select(RLModel).where(RLModel.is_active.is_(True)).limit(1)

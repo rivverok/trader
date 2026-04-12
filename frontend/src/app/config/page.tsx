@@ -116,8 +116,8 @@ export default function ConfigPage() {
             <div>
               <CardTitle>System Mode</CardTitle>
               <CardDescription>
-                In <strong>data collection</strong> mode the system collects data and captures
-                state snapshots for RL training. In <strong>trading</strong> mode the RL agent
+                In <strong>data collection</strong> mode the system collects data and generates
+                signals for RL training. In <strong>trading</strong> mode the RL agent
                 makes trade decisions using the loaded ONNX model.
               </CardDescription>
             </div>
@@ -164,7 +164,7 @@ export default function ConfigPage() {
           )}
           {systemMode === "data_collection" && (
             <p className="mt-4 rounded-md bg-blue-500/10 px-3 py-2 text-sm text-blue-400">
-              Collecting data and capturing state snapshots. No trades will be proposed.
+              Collecting data and generating signals. No trades will be proposed.
               Switch to trading mode after training and uploading an RL model.
             </p>
           )}

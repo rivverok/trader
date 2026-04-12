@@ -193,7 +193,7 @@ export default function DashboardPage() {
             {systemStatus.system_mode === "data_collection" && (
               <div className="rounded-md border border-blue-500/20 bg-blue-500/5 p-3">
                 <p className="text-sm text-blue-300">
-                  Collecting data, generating signals, and storing snapshots for RL training.
+                  Collecting data and generating signals for RL training.
                   Trading is disabled until an RL model is trained and deployed.
                 </p>
               </div>

@@ -32,7 +32,6 @@ _TASK_TO_SCHEDULE_KEY = {
     "check_stop_loss_orders": "check-stop-loss-orders",
     "discover_stocks": "discover-stocks",
     "check_model_staleness": "check-model-staleness",
-    "capture_state_snapshot": "capture-state-snapshot",
 }
 
 REDIS_KEY_PREFIX = "task_status:"

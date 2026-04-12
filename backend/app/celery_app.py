@@ -78,10 +78,7 @@ def _get_default_schedule() -> dict:
             "task": "check_model_staleness",
             "schedule": crontab(minute=0, hour=8),
         },
-        "capture-state-snapshot": {
-            "task": "capture_state_snapshot",
-            "schedule": crontab(minute=5, hour=16, day_of_week="mon-fri"),
-        },
+
     }
 
 

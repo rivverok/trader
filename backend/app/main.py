@@ -55,8 +55,8 @@ from app.api.alerts import router as alerts_router
 from app.api.discovery import router as discovery_router
 from app.api.status import router as status_router
 from app.api.tasks import router as tasks_router
-from app.api.data_collection import router as data_collection_router
 from app.api.rl_models import router as rl_models_router
+from app.api.training import router as training_router
 
 app.include_router(stocks_router)
 app.include_router(economic_router)
@@ -73,8 +73,8 @@ app.include_router(alerts_router)
 app.include_router(discovery_router)
 app.include_router(status_router)
 app.include_router(tasks_router)
-app.include_router(data_collection_router)
 app.include_router(rl_models_router)
+app.include_router(training_router)
 
 
 @app.get("/api/health")

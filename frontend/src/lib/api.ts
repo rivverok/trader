@@ -316,52 +316,6 @@ export interface RLModelListResponse {
   active_model_id: number | null;
 }
 
-export interface SnapshotSummary {
-  id: number;
-  timestamp: string;
-  snapshot_type: string;
-  stock_count: number;
-}
-
-export interface DataCollectionStatusResponse {
-  total_snapshots: number;
-  date_range: { first: string | null; last: string | null };
-  coverage: Record<string, number>;
-  latest_snapshot: SnapshotSummary | null;
-}
-
-export interface SnapshotListResponse {
-  total: number;
-  skip: number;
-  limit: number;
-  snapshots: Array<{
-    id: number;
-    timestamp: string;
-    snapshot_type: string;
-    stock_count: number;
-    portfolio_value: number | null;
-  }>;
-}
-
-export interface SnapshotDetail {
-  id: number;
-  timestamp: string;
-  snapshot_type: string;
-  portfolio_state: Record<string, unknown>;
-  market_state: Record<string, unknown>;
-  metadata: Record<string, unknown> | null;
-  stocks: Array<{
-    symbol: string;
-    price_data: Record<string, unknown>;
-    technical_indicators: Record<string, unknown> | null;
-    ml_signal: Record<string, unknown> | null;
-    sentiment: Record<string, unknown> | null;
-    synthesis: Record<string, unknown> | null;
-    analyst_input: Record<string, unknown> | null;
-    relative_strength: Record<string, unknown> | null;
-  }>;
-}
-
 // ── Analytics types ─────────────────────────────────────────────────
 
 export interface PerformanceMetrics {
@@ -782,19 +736,6 @@ export const api = {
       ),
   },
   dataCollection: {
-    status: () =>
-      fetchApi<DataCollectionStatusResponse>("/data-collection/status"),
-    snapshots: (skip = 0, limit = 50) =>
-      fetchApi<SnapshotListResponse>(
-        `/data-collection/snapshots?skip=${skip}&limit=${limit}`
-      ),
-    triggerSnapshot: () =>
-      fetchApi<{ status: string; snapshot_id: number; timestamp: string; stock_count: number }>(
-        "/data-collection/snapshot",
-        { method: "POST" }
-      ),
-    snapshotDetail: (id: number) =>
-      fetchApi<SnapshotDetail>(`/data-collection/snapshots/${id}`),
     getMode: () =>
       fetchApi<{ mode: string }>("/system/mode"),
     setMode: (mode: string) =>

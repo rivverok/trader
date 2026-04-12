@@ -18,14 +18,12 @@ import {
   Activity,
   ListChecks,
   Brain,
-  Database,
 } from "lucide-react";
 import { AlertBell } from "@/components/alert-bell";
 
 const navItems = [
   { href: "/overview", label: "Overview", icon: Eye },
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/data-collection", label: "Data Collection", icon: Database },
   { href: "/watchlist", label: "Watchlist", icon: Telescope },
   { href: "/signals", label: "Signals", icon: Signal },
   { href: "/analyst", label: "Analyst", icon: PenLine },
