@@ -483,7 +483,7 @@ export default function ConfigPage() {
         <CardHeader>
           <CardTitle>Database Backups</CardTitle>
           <CardDescription>
-            Automatic daily backups to USB drive. Managed by cron on the server.
+            Automatic daily backups to USB drive. Runs every day at 2 AM.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -521,8 +521,8 @@ export default function ConfigPage() {
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              No backup has run yet. Set up the cron job on the server to enable
-              automatic backups.
+              No backup has run yet. Backups run automatically every day at 2
+              AM.
             </p>
           )}
         </CardContent>

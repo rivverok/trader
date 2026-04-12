@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     ML_SIGNAL_INTERVAL_SEC: int = 3600
     PORTFOLIO_SYNC_INTERVAL_SEC: int = 300
 
+    # ── Backups ──
+    BACKUP_DIR: str = "/backups"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     def get_database_url(self) -> str:

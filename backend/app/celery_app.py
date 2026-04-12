@@ -107,6 +107,12 @@ def _build_beat_schedule() -> dict:
             conf = {**conf, "schedule": crontab(**ovr["crontab"])}
         schedule[key] = conf
 
+    # ── Always-on tasks (not affected by overrides or system pause) ───
+    schedule["run-database-backup"] = {
+        "task": "run_database_backup",
+        "schedule": crontab(minute=0, hour=2),
+    }
+
     return schedule
 
 celery_app.conf.update(

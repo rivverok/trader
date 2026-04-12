@@ -2,9 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps for psycopg2 and pandas
+# System deps for psycopg2, pandas, and pg_dump
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc libpq-dev && \
+    apt-get install -y --no-install-recommends gcc libpq-dev postgresql-client && \
     rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .

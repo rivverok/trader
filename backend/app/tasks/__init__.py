@@ -8,5 +8,6 @@ from app.tasks import execution_tasks  # noqa: F401
 from app.tasks import ml_tasks  # noqa: F401
 from app.tasks import discovery_tasks  # noqa: F401
 from app.tasks import maintenance_tasks  # noqa: F401
+from app.tasks import backup_tasks  # noqa: F401
 
 __all__ = ["celery_app"]
