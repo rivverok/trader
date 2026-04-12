@@ -143,26 +143,31 @@ async def run_stock_discovery(db: AsyncSession) -> dict[str, Any]:
             added.append(symbol)
 
     # ── 6. Process REMOVE recommendations ────────────────────────────
+    # In data_collection mode, skip removals to preserve training data continuity.
     removed = []
-    held_symbols = {p["symbol"] for p in portfolio_ctx}
-    for rec in result.get("remove", []):
-        symbol = rec.get("symbol", "").upper().strip()
-        if not symbol:
-            continue
-        if symbol in held_symbols:
-            logger.info("Skipping removal of %s — currently held in portfolio", symbol)
-            log = DiscoveryLog(
-                batch_id=batch_id, action="keep", symbol=symbol,
-                reasoning=f"AI recommended removal but stock is held in portfolio: {rec.get('reasoning', '')}",
-                confidence=0.5, source="discovery",
+    from app.tasks.task_status import get_system_mode
+    if get_system_mode() == "data_collection":
+        logger.info("Skipping removals — data_collection mode preserves watchlist for training")
+    else:
+        held_symbols = {p["symbol"] for p in portfolio_ctx}
+        for rec in result.get("remove", []):
+            symbol = rec.get("symbol", "").upper().strip()
+            if not symbol:
+                continue
+            if symbol in held_symbols:
+                logger.info("Skipping removal of %s — currently held in portfolio", symbol)
+                log = DiscoveryLog(
+                    batch_id=batch_id, action="keep", symbol=symbol,
+                    reasoning=f"AI recommended removal but stock is held in portfolio: {rec.get('reasoning', '')}",
+                    confidence=0.5, source="discovery",
+                )
+                db.add(log)
+                continue
+            success = await _remove_stock(
+                db, symbol, rec.get("reasoning", ""), batch_id,
             )
-            db.add(log)
-            continue
-        success = await _remove_stock(
-            db, symbol, rec.get("reasoning", ""), batch_id,
-        )
-        if success:
-            removed.append(symbol)
+            if success:
+                removed.append(symbol)
 
     # ── 7. Process hint responses ────────────────────────────────────
     hint_responses = result.get("hint_responses", {})
