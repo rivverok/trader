@@ -154,9 +154,9 @@ export default function DashboardPage() {
                 systemStatus.trading_halted ? (
                   <span className="text-destructive">Halted</span>
                 ) : systemStatus.system_paused ? (
-                  <span className="text-orange-500">System Paused</span>
-                ) : systemStatus.trading_paused ? (
-                  <span className="text-yellow-500">Paused</span>
+                  <span className="text-orange-500">Paused</span>
+                ) : systemStatus.system_mode === "data_collection" ? (
+                  <span className="text-blue-500">Collecting</span>
                 ) : (
                   <span className="text-green-500">Active</span>
                 )
@@ -167,7 +167,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>Mode: {systemStatus?.system_mode === "trading" ? "Trading" : "Data Collection"}</span>
+              <span>Mode: {systemStatus?.system_mode === "trading" ? "RL Trading" : "Data Collection"}</span>
               {health && <span>| {health.trading_mode}</span>}
             </div>
           </CardContent>
@@ -178,9 +178,26 @@ export default function DashboardPage() {
       {systemStatus && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">System Controls</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">System Controls</CardTitle>
+              <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                systemStatus.system_mode === "trading"
+                  ? "bg-purple-500/10 text-purple-400"
+                  : "bg-blue-500/10 text-blue-400"
+              }`}>
+                {systemStatus.system_mode === "trading" ? "RL Trading Mode" : "Data Collection Mode"}
+              </span>
+            </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
+            {systemStatus.system_mode === "data_collection" && (
+              <div className="rounded-md border border-blue-500/20 bg-blue-500/5 p-3">
+                <p className="text-sm text-blue-300">
+                  Collecting data, generating signals, and storing snapshots for RL training.
+                  Trading is disabled until an RL model is trained and deployed.
+                </p>
+              </div>
+            )}
             <div className="flex flex-wrap gap-3">
               {systemStatus.system_paused ? (
                 <Button size="sm" variant="default" onClick={() => api.system.resumeSystem().then(refresh)}>
@@ -188,51 +205,36 @@ export default function DashboardPage() {
                 </Button>
               ) : (
                 <Button size="sm" variant="secondary" onClick={() => {
-                  if (confirm("Pause all scheduled tasks? This stops data collection, analysis, ML, and trading to save costs.")) {
+                  if (confirm("Pause all scheduled tasks? This stops data collection, analysis, and ML signal generation.")) {
                     api.system.pauseSystem().then(refresh);
                   }
                 }}>
                   Pause System
                 </Button>
               )}
-              {systemStatus.trading_paused ? (
-                <Button size="sm" variant="default" onClick={() => api.system.resume().then(refresh)}>
-                  Resume Trading
-                </Button>
-              ) : (
-                <Button size="sm" variant="secondary" onClick={() => api.system.pause().then(refresh)}>
-                  Pause Trading
-                </Button>
-              )}
-              <Button
-                size="sm"
-                variant={systemStatus.system_mode === "trading" ? "secondary" : "default"}
-                onClick={() => {
-                  const nextMode = systemStatus.system_mode === "trading" ? "data_collection" : "trading";
-                  api.dataCollection.setMode(nextMode).then(refresh);
-                }}
-              >
-                {systemStatus.system_mode === "trading" ? "Switch to Data Collection" : "Switch to Trading"}
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={() => {
-                  if (confirm("EMERGENCY STOP: This will close ALL positions and halt trading. Continue?")) {
-                    api.system.emergencyStop().then(refresh);
-                  }
-                }}
-              >
-                Emergency Stop
-              </Button>
-              {systemStatus.trading_halted && (
-                <Button size="sm" variant="outline" onClick={() => api.risk.resume().then(refresh)}>
-                  Clear Halt
-                </Button>
+              {systemStatus.system_mode === "trading" && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => {
+                      if (confirm("EMERGENCY STOP: This will close ALL positions and halt trading. Continue?")) {
+                        api.system.emergencyStop().then(refresh);
+                      }
+                    }}
+                  >
+                    Emergency Stop
+                  </Button>
+                  {systemStatus.trading_halted && (
+                    <Button size="sm" variant="outline" onClick={() => api.risk.resume().then(refresh)}>
+                      Clear Halt
+                    </Button>
+                  )}
+                </>
               )}
             </div>
             {systemStatus.trading_halted && systemStatus.halt_reason && (
-              <p className="mt-2 text-sm text-destructive">{systemStatus.halt_reason}</p>
+              <p className="text-sm text-destructive">{systemStatus.halt_reason}</p>
             )}
           </CardContent>
         </Card>
