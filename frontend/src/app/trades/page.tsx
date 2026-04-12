@@ -105,15 +105,6 @@ export default function TradesPage() {
     }
   }
 
-  async function handleReevaluate(id: number) {
-    try {
-      await api.trades.reevaluate(id);
-      await loadData();
-    } catch {
-      /* empty */
-    }
-  }
-
   if (loading && trades.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -225,20 +216,7 @@ export default function TradesPage() {
                 {label}
               </Button>
             ))}
-            <div className="ml-auto">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={async () => {
-                  try {
-                    await api.trades.reevaluateQueued();
-                    setTimeout(() => loadData(), 3000);
-                  } catch { /* empty */ }
-                }}
-              >
-                Re-evaluate Queued
-              </Button>
-            </div>
+
           </div>
 
           <Card>
@@ -249,6 +227,11 @@ export default function TradesPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 rounded-md border border-border/50 bg-muted/30 p-3 text-sm text-muted-foreground">
+                <strong className="text-foreground">How it works:</strong> The AI analyzes watchlist stocks every 30 min → proposes trades → auto-approves during market hours → executes.
+                Approve/Reject buttons are optional overrides. Queued trades are automatically re-checked at market open.
+              </div>
+
               {trades.length === 0 ? (
                 <div className="flex h-32 items-center justify-center rounded-md border border-dashed">
                   <p className="text-sm text-muted-foreground">
@@ -306,15 +289,6 @@ export default function TradesPage() {
                               </Button>
                             </>
                           )}
-                          {t.status === "queued" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleReevaluate(t.id)}
-                            >
-                              Re-check
-                            </Button>
-                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -327,9 +301,9 @@ export default function TradesPage() {
                         </div>
                       </div>
 
-                      {t.risk_check_passed === false && (
-                        <div className="mt-2 text-sm text-red-400">
-                          Risk blocked: {t.risk_check_reason}
+                      {t.status === "queued" && (
+                        <div className="mt-2 text-sm text-yellow-400">
+                          Queued{t.risk_check_reason && t.risk_check_reason !== "ok" ? ` — ${t.risk_check_reason}` : " — will be re-checked at market open"}
                         </div>
                       )}
 
