@@ -53,18 +53,14 @@ def _get_default_schedule() -> dict:
             "task": "retrain_model",
             "schedule": crontab(minute=0, hour=2, day_of_week="sun"),
         },
-        "run-decision-cycle": {
-            "task": "run_decision_cycle",
-            "schedule": crontab(minute="0,30", hour="7-20", day_of_week="mon-fri"),
-            "kwargs": {"force": False},
-        },
-        "execute-approved-trades": {
-            "task": "execute_approved_trades",
-            "schedule": crontab(minute="*", hour="9-16", day_of_week="mon-fri"),
-        },
+        # ── Trading-mode tasks (mode-gated, skip in data_collection) ──
         "run-rl-inference": {
             "task": "run_rl_inference",
             "schedule": crontab(minute="0,30", hour="9-16", day_of_week="mon-fri"),
+        },
+        "execute-approved-trades": {
+            "task": "execute_approved_trades",
+            "schedule": crontab(minute="*/5", hour="9-16", day_of_week="mon-fri"),
         },
         "sync-portfolio": {
             "task": "sync_portfolio",
@@ -72,7 +68,7 @@ def _get_default_schedule() -> dict:
         },
         "check-stop-loss-orders": {
             "task": "check_stop_loss_orders",
-            "schedule": crontab(minute="*", hour="9-16", day_of_week="mon-fri"),
+            "schedule": crontab(minute="*/5", hour="9-16", day_of_week="mon-fri"),
         },
         "discover-stocks": {
             "task": "discover_stocks",

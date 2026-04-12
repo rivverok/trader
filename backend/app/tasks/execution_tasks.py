@@ -1,7 +1,7 @@
 """Execution engine Celery tasks — execute trades, sync portfolio, monitor stops."""
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from celery import shared_task
 from sqlalchemy import desc, select
@@ -9,10 +9,7 @@ from sqlalchemy import desc, select
 from app.database import async_session
 from app.engine.executor import execute_trade, sync_order_status
 from app.engine.portfolio_sync import sync_portfolio
-from app.engine.risk_manager import check_trade_allowed, get_risk_state, record_realized_loss
-from app.models.portfolio import PortfolioPosition, PortfolioSnapshot
-from app.models.price import Price
-from app.models.stock import Stock
+from app.engine.risk_manager import get_risk_state, record_realized_loss
 from app.models.trade import ProposedTrade, Trade
 
 logger = logging.getLogger(__name__)
@@ -77,10 +74,12 @@ async def _execute_approved_trades():
 
 @shared_task(name="sync_portfolio")
 def sync_portfolio_task(force=False):
-    """Sync portfolio from Alpaca. Runs every 5 minutes."""
-    from app.tasks.task_status import update_task_status, is_system_paused
+    """Sync portfolio from Alpaca. Runs every 5 minutes in trading mode."""
+    from app.tasks.task_status import update_task_status, is_system_paused, get_system_mode
     if not force and is_system_paused():
         return {"status": "system_paused"}
+    if not force and get_system_mode() != "trading":
+        return {"status": "skipped", "reason": "not in trading mode"}
     result = _run_async(_sync_portfolio())
     update_task_status("sync_portfolio", result)
     return result
@@ -109,10 +108,12 @@ async def _sync_portfolio():
 
 @shared_task(name="check_stop_loss_orders")
 def check_stop_loss_orders_task(force=False):
-    """Monitor stop-loss and take-profit order status. Runs every 1 minute."""
-    from app.tasks.task_status import update_task_status, is_system_paused
+    """Monitor stop-loss and take-profit order status. Runs every 5 minutes in trading mode."""
+    from app.tasks.task_status import update_task_status, is_system_paused, get_system_mode
     if not force and is_system_paused():
         return {"status": "system_paused"}
+    if not force and get_system_mode() != "trading":
+        return {"status": "skipped", "reason": "not in trading mode"}
     result = _run_async(_check_stop_loss_orders())
     update_task_status("check_stop_loss_orders", result)
     return result
@@ -149,149 +150,3 @@ async def _check_stop_loss_orders():
                     await record_realized_loss(db, loss)
 
         return {"status": "ok", "checked": len(pending), "updated": updated_count}
-
-
-@shared_task(name="auto_execute_proposals")
-def auto_execute_proposals_task(force=False):
-    """When auto_execute is on, auto-approve proposed trades that pass risk checks.
-    Runs every 1 minute."""
-    from app.tasks.task_status import update_task_status, is_system_paused
-    if not force and is_system_paused():
-        return {"status": "system_paused"}
-    result = _run_async(_auto_execute_proposals())
-    update_task_status("auto_execute_proposals", result)
-    return result
-
-
-async def _auto_execute_proposals():
-    async with async_session() as db:
-        state = await get_risk_state(db)
-        if not state.auto_execute and not state.growth_mode:
-            return {"status": "auto_execute_off", "approved": 0}
-        if state.trading_paused or state.trading_halted:
-            return {"status": "paused_or_halted", "approved": 0}
-
-        # Find proposed trades that passed risk check
-        result = await db.execute(
-            select(ProposedTrade).where(
-                ProposedTrade.status == "proposed",
-                ProposedTrade.risk_check_passed == True,
-            )
-        )
-        proposals = result.scalars().all()
-
-        approved_count = 0
-        for p in proposals:
-            if p.confidence >= state.min_confidence:
-                p.status = "approved"
-                p.updated_at = datetime.now(timezone.utc)
-                approved_count += 1
-
-        if approved_count > 0:
-            await db.commit()
-            logger.info("Auto-approved %d proposals", approved_count)
-
-        return {"status": "ok", "approved": approved_count}
-
-
-@shared_task(name="reevaluate_queued_proposals")
-def reevaluate_queued_proposals_task(force=False):
-    """Re-check queued proposals — promote to 'proposed' if they now pass risk.
-
-    Runs at market open. Catches proposals blocked by transient conditions
-    (daily loss limit that reset, confidence threshold changes, etc.).
-    """
-    from app.tasks.task_status import update_task_status, is_system_paused
-    if not force and is_system_paused():
-        return {"status": "system_paused"}
-    result = _run_async(_reevaluate_queued_proposals())
-    update_task_status("reevaluate_queued_proposals", result)
-    return result
-
-
-async def _reevaluate_queued_proposals():
-    async with async_session() as db:
-        state = await get_risk_state(db)
-        if state.trading_halted:
-            return {"status": "halted", "promoted": 0}
-
-        # Get portfolio value for risk checks
-        snap_result = await db.execute(
-            select(PortfolioSnapshot).order_by(desc(PortfolioSnapshot.timestamp)).limit(1)
-        )
-        snap = snap_result.scalar_one_or_none()
-        portfolio_value = snap.total_value if snap else state.max_trade_dollars * 100
-
-        # Find queued proposals from the last 48 hours
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
-        result = await db.execute(
-            select(ProposedTrade, Stock)
-            .join(Stock, Stock.id == ProposedTrade.stock_id)
-            .where(
-                ProposedTrade.status == "queued",
-                ProposedTrade.created_at >= cutoff,
-            )
-            .order_by(ProposedTrade.created_at)
-        )
-        queued = result.all()
-
-        if not queued:
-            return {"status": "ok", "promoted": 0, "still_queued": 0}
-
-        # Expire old queued proposals (>48h)
-        expire_result = await db.execute(
-            select(ProposedTrade).where(
-                ProposedTrade.status == "queued",
-                ProposedTrade.created_at < cutoff,
-            )
-        )
-        for old in expire_result.scalars().all():
-            old.status = "expired"
-            old.updated_at = datetime.now(timezone.utc)
-
-        promoted = 0
-        still_queued = 0
-        for proposed, stock in queued:
-            # Use price_target if set (limit orders), otherwise look up latest price
-            price = proposed.price_target
-            if not price or price <= 0:
-                price_result = await db.execute(
-                    select(Price.close)
-                    .where(Price.stock_id == stock.id)
-                    .order_by(desc(Price.timestamp))
-                    .limit(1)
-                )
-                price = price_result.scalar() or 0.0
-
-            if price <= 0:
-                still_queued += 1
-                continue
-
-            allowed, reason = await check_trade_allowed(
-                db=db,
-                stock=stock,
-                action=proposed.action,
-                shares=proposed.shares,
-                price=price,
-                confidence=proposed.confidence,
-                portfolio_value=portfolio_value,
-            )
-            if allowed:
-                proposed.status = "proposed"
-                proposed.risk_check_passed = True
-                proposed.risk_check_reason = "ok (re-evaluated)"
-                proposed.updated_at = datetime.now(timezone.utc)
-                promoted += 1
-                logger.info(
-                    "Promoted queued proposal #%d (%s %s) — was: %s",
-                    proposed.id, proposed.action, stock.symbol,
-                    proposed.risk_check_reason,
-                )
-            else:
-                still_queued += 1
-
-        if promoted > 0:
-            await db.commit()
-        logger.info("Re-evaluated %d queued: %d promoted, %d still queued",
-                     len(queued), promoted, still_queued)
-        return {"status": "ok", "promoted": promoted, "still_queued": still_queued}
