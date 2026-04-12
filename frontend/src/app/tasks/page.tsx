@@ -113,14 +113,20 @@ function formatSchedule(raw: string): string {
     const fmtTime = () => {
       const hours = hour || "*";
       const mins = minute || "0";
-      if (hours === "*") return mins === "0" ? "every hour" : `every hour at :${mins.padStart(2, "0")}`;
+      const everyMinute = mins === "*";
+      if (hours === "*") {
+        if (everyMinute) return "every minute";
+        return mins === "0" ? "every hour" : `every hour at :${mins.padStart(2, "0")}`;
+      }
       if (hours.includes("-")) {
         const [start, end] = hours.split("-").map(Number);
         const startFmt = start <= 12 ? `${start || 12}` : `${start - 12}`;
         const endFmt = end <= 12 ? `${end || 12}` : `${end - 12}`;
         const startAP = start < 12 ? "AM" : "PM";
         const endAP = end < 12 ? "AM" : "PM";
+        if (everyMinute) return `every minute, ${startFmt}${startAP}–${endFmt}${endAP}`;
         const minLabel = mins === "0" ? "" : mins.includes(",") ? ` at :${mins}` : ` at :${mins.padStart(2, "0")}`;
+        if (mins.includes("*/")) return `every ${mins.replace("*/", "")} min, ${startFmt}${startAP}–${endFmt}${endAP}`;
         return `${startFmt}${startAP}–${endFmt}${endAP}${minLabel}`;
       }
       const h = Number(hours);
