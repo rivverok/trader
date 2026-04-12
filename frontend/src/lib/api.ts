@@ -316,6 +316,38 @@ export interface RLModelListResponse {
   active_model_id: number | null;
 }
 
+// ── Training Status types ───────────────────────────────────────────
+
+export interface TableStats {
+  count: number;
+  first: string | null;
+  last: string | null;
+  trading_days: number;
+}
+
+export interface TrainingReadiness {
+  min_days_target: number;
+  good_days_target: number;
+  current_days: number;
+  feature_days: Record<string, number>;
+  binding_constraint: string | null;
+  pct_to_minimum: number;
+  pct_to_recommended: number;
+  ready_minimum: boolean;
+  ready_recommended: boolean;
+  est_minimum_date: string | null;
+  est_recommended_date: string | null;
+  collection_start: string | null;
+}
+
+export interface TrainingStatus {
+  stock_count: number;
+  tables: Record<string, TableStats>;
+  per_stock_signals: Record<string, number>;
+  daily_collection_rate: { date: string; count: number }[];
+  readiness: TrainingReadiness;
+}
+
 // ── Analytics types ─────────────────────────────────────────────────
 
 export interface PerformanceMetrics {
@@ -768,5 +800,8 @@ export const api = {
       fetchApi<{ status: string; message: string }>(`/rl-models/${id}`, {
         method: "DELETE",
       }),
+  },
+  training: {
+    status: () => fetchApi<TrainingStatus>("/training/status"),
   },
 };

@@ -5,6 +5,7 @@ to pull the exact data it needs, with time-range filters.
 
 Endpoints:
   GET /api/training/catalog     — available stocks + date ranges for each data type
+  GET /api/training/status      — collection progress, readiness, and training target date
   GET /api/training/prices      — OHLCV price bars (daily or intraday)
   GET /api/training/signals     — ML model signals (buy/sell/hold + confidence)
   GET /api/training/sentiment   — news sentiment scores per stock
@@ -14,10 +15,11 @@ Endpoints:
   GET /api/training/trades      — executed trade history
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, date, timedelta, timezone
+import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import case, cast, Date, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -75,6 +77,165 @@ async def training_catalog(db: AsyncSession = Depends(get_db)):
         "portfolio": {"count": pf[0], "first": pf[1], "last": pf[2]},
         "economic": {"count": ec[0], "first": ec[1], "last": ec[2]},
         "trades": {"count": tc},
+    }
+
+
+# ── Collection Status + Training Readiness ───────────────────────────
+
+# Minimum trading days with data across ALL feature types before training is viable.
+MIN_TRAINING_DAYS = 63  # ~3 months
+GOOD_TRAINING_DAYS = 126  # ~6 months — recommended target
+
+
+def _count_trading_days(start: date | None, end: date | None) -> int:
+    """Count weekdays between two dates."""
+    if not start or not end:
+        return 0
+    d, count = start, 0
+    while d <= end:
+        if d.weekday() < 5:
+            count += 1
+        d += timedelta(days=1)
+    return count
+
+
+def _project_date(current_days: int, target_days: int, collection_start: date | None) -> str | None:
+    """Project when we'll hit target_days, assuming ~5 trading days per 7 calendar days."""
+    if current_days >= target_days:
+        return None  # already there
+    if not collection_start:
+        return None
+    remaining = target_days - current_days
+    calendar_days = math.ceil(remaining * 7 / 5)
+    return (date.today() + timedelta(days=calendar_days)).isoformat()
+
+
+@router.get("/status")
+async def training_status(db: AsyncSession = Depends(get_db)):
+    """Collection progress, data quality, and projected training readiness."""
+
+    watchlist_q = await db.execute(
+        select(func.count(Stock.id)).where(Stock.on_watchlist.is_(True))
+    )
+    stock_count = watchlist_q.scalar() or 0
+
+    # ── Per-table stats ──────────────────────────────────────────────
+    async def _table_stats(model, ts_col):
+        q = await db.execute(
+            select(func.count(model.id), func.min(ts_col), func.max(ts_col))
+        )
+        row = q.one()
+        first_ts = row[1]
+        last_ts = row[2]
+        first_d = first_ts.date() if first_ts else None
+        last_d = last_ts.date() if last_ts else None
+        return {
+            "count": row[0],
+            "first": first_ts.isoformat() if first_ts else None,
+            "last": last_ts.isoformat() if last_ts else None,
+            "trading_days": _count_trading_days(first_d, last_d),
+        }
+
+    prices = await _table_stats(Price, Price.timestamp)
+    signals = await _table_stats(MLSignal, MLSignal.created_at)
+    economic = await _table_stats(EconomicIndicator, EconomicIndicator.date)
+    portfolio = await _table_stats(PortfolioSnapshot, PortfolioSnapshot.timestamp)
+
+    # Sentiment: count analyzed articles
+    sent_q = await db.execute(
+        select(
+            func.count(NewsAnalysis.id),
+            func.min(NewsArticle.published_at),
+            func.max(NewsArticle.published_at),
+        )
+        .join(NewsArticle, NewsAnalysis.article_id == NewsArticle.id)
+    )
+    sent_row = sent_q.one()
+    sent_first = sent_row[1]
+    sent_last = sent_row[2]
+    sentiment = {
+        "count": sent_row[0],
+        "first": sent_first.isoformat() if sent_first else None,
+        "last": sent_last.isoformat() if sent_last else None,
+        "trading_days": _count_trading_days(
+            sent_first.date() if sent_first else None,
+            sent_last.date() if sent_last else None,
+        ),
+    }
+
+    synthesis = await _table_stats(ContextSynthesis, ContextSynthesis.created_at)
+
+    # ── Per-stock coverage (signals per stock) ───────────────────────
+    coverage_q = await db.execute(
+        select(Stock.symbol, func.count(MLSignal.id))
+        .join(MLSignal, MLSignal.stock_id == Stock.id)
+        .where(Stock.on_watchlist.is_(True))
+        .group_by(Stock.symbol)
+        .order_by(Stock.symbol)
+    )
+    per_stock = {r[0]: r[1] for r in coverage_q.all()}
+
+    # ── Daily collection rate (last 7 days) ──────────────────────────
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    daily_q = await db.execute(
+        select(
+            cast(Price.timestamp, Date).label("day"),
+            func.count(Price.id),
+        )
+        .where(Price.timestamp >= week_ago)
+        .group_by("day")
+        .order_by("day")
+    )
+    daily_prices = [{"date": str(r[0]), "count": r[1]} for r in daily_q.all()]
+
+    # ── Training readiness ───────────────────────────────────────────
+    # The binding constraint is the feature type with the fewest trading days
+    feature_days = {
+        "prices": prices["trading_days"],
+        "signals": signals["trading_days"],
+        "sentiment": sentiment["trading_days"],
+        "synthesis": synthesis["trading_days"],
+    }
+    min_feature_days = min(feature_days.values()) if feature_days else 0
+
+    # Collection start = earliest first date across derived features
+    derived_firsts = []
+    for tbl in [signals, sentiment, synthesis]:
+        if tbl["first"]:
+            derived_firsts.append(tbl["first"][:10])
+    collection_start = date.fromisoformat(min(derived_firsts)) if derived_firsts else None
+
+    pct_min = min(100, round(min_feature_days / MIN_TRAINING_DAYS * 100)) if MIN_TRAINING_DAYS else 0
+    pct_good = min(100, round(min_feature_days / GOOD_TRAINING_DAYS * 100)) if GOOD_TRAINING_DAYS else 0
+
+    readiness = {
+        "min_days_target": MIN_TRAINING_DAYS,
+        "good_days_target": GOOD_TRAINING_DAYS,
+        "current_days": min_feature_days,
+        "feature_days": feature_days,
+        "binding_constraint": min(feature_days, key=feature_days.get) if feature_days else None,
+        "pct_to_minimum": pct_min,
+        "pct_to_recommended": pct_good,
+        "ready_minimum": min_feature_days >= MIN_TRAINING_DAYS,
+        "ready_recommended": min_feature_days >= GOOD_TRAINING_DAYS,
+        "est_minimum_date": _project_date(min_feature_days, MIN_TRAINING_DAYS, collection_start),
+        "est_recommended_date": _project_date(min_feature_days, GOOD_TRAINING_DAYS, collection_start),
+        "collection_start": collection_start.isoformat() if collection_start else None,
+    }
+
+    return {
+        "stock_count": stock_count,
+        "tables": {
+            "prices": prices,
+            "signals": signals,
+            "sentiment": sentiment,
+            "synthesis": synthesis,
+            "economic": economic,
+            "portfolio": portfolio,
+        },
+        "per_stock_signals": per_stock,
+        "daily_collection_rate": daily_prices,
+        "readiness": readiness,
     }
 
 
