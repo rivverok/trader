@@ -56,18 +56,15 @@ def _get_default_schedule() -> dict:
         "run-decision-cycle": {
             "task": "run_decision_cycle",
             "schedule": crontab(minute="0,30", hour="7-20", day_of_week="mon-fri"),
+            "kwargs": {"force": False},
         },
         "execute-approved-trades": {
             "task": "execute_approved_trades",
             "schedule": crontab(minute="*", hour="9-16", day_of_week="mon-fri"),
         },
-        "auto-execute-proposals": {
-            "task": "auto_execute_proposals",
-            "schedule": crontab(minute="*", hour="9-16", day_of_week="mon-fri"),
-        },
-        "reevaluate-queued-proposals": {
-            "task": "reevaluate_queued_proposals",
-            "schedule": crontab(minute=30, hour=9, day_of_week="mon-fri"),
+        "run-rl-inference": {
+            "task": "run_rl_inference",
+            "schedule": crontab(minute="0,30", hour="9-16", day_of_week="mon-fri"),
         },
         "sync-portfolio": {
             "task": "sync_portfolio",
@@ -84,6 +81,10 @@ def _get_default_schedule() -> dict:
         "check-model-staleness": {
             "task": "check_model_staleness",
             "schedule": crontab(minute=0, hour=8),
+        },
+        "capture-state-snapshot": {
+            "task": "capture_state_snapshot",
+            "schedule": crontab(minute=5, hour=16, day_of_week="mon-fri"),
         },
     }
 

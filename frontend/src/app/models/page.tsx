@@ -9,7 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, type ModelItem, type TaskInfo } from "@/lib/api";
+import { api, type ModelItem, type TaskInfo, type RLModel, type RLModelListResponse } from "@/lib/api";
 
 function StatusBadge({ active }: { active: boolean }) {
   return (
@@ -258,10 +258,20 @@ export default function ModelsPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [activating, setActivating] = useState<number | null>(null);
 
+  // RL models state
+  const [rlModels, setRlModels] = useState<RLModelListResponse | null>(null);
+  const [rlUploading, setRlUploading] = useState(false);
+  const [rlActivating, setRlActivating] = useState<number | null>(null);
+  const [rlMsg, setRlMsg] = useState<string | null>(null);
+
   const refresh = useCallback(async () => {
     try {
-      const data = await api.ml.models();
+      const [data, rl] = await Promise.all([
+        api.ml.models(),
+        api.rlModels.list(),
+      ]);
       setModels(data);
+      setRlModels(rl);
     } catch {
       // ignore
     } finally {
@@ -294,6 +304,58 @@ export default function ModelsPage() {
       // ignore
     } finally {
       setActivating(null);
+    }
+  };
+
+  const handleRlUpload = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setRlUploading(true);
+    setRlMsg(null);
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    try {
+      await api.rlModels.upload(formData);
+      setRlMsg("Model uploaded successfully");
+      form.reset();
+      await refresh();
+    } catch (err) {
+      setRlMsg(`Error: ${err instanceof Error ? err.message : "unknown"}`);
+    } finally {
+      setRlUploading(false);
+    }
+  };
+
+  const handleRlActivate = async (id: number) => {
+    setRlActivating(id);
+    try {
+      await api.rlModels.activate(id);
+      await refresh();
+    } catch {
+      // ignore
+    } finally {
+      setRlActivating(null);
+    }
+  };
+
+  const handleRlDeactivate = async (id: number) => {
+    setRlActivating(id);
+    try {
+      await api.rlModels.deactivate(id);
+      await refresh();
+    } catch {
+      // ignore
+    } finally {
+      setRlActivating(null);
+    }
+  };
+
+  const handleRlDelete = async (id: number) => {
+    if (!confirm("Delete this RL model?")) return;
+    try {
+      await api.rlModels.delete(id);
+      await refresh();
+    } catch {
+      // ignore
     }
   };
 
@@ -407,7 +469,7 @@ export default function ModelsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Model History</CardTitle>
-          <CardDescription>All trained models — click to expand metrics</CardDescription>
+          <CardDescription>All trained ML models — click to expand metrics</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -500,6 +562,116 @@ export default function ModelsPage() {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── RL Models ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base">RL Models</CardTitle>
+              <CardDescription>
+                Upload ONNX models trained externally. Activate one for live inference.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Upload form */}
+          <form onSubmit={handleRlUpload} className="space-y-3 rounded-lg border p-4">
+            <h4 className="text-sm font-medium">Upload ONNX Model</h4>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Name</label>
+                <input name="name" required placeholder="e.g. ppo-v1"
+                  className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Version</label>
+                <input name="version" required placeholder="e.g. 1.0.0"
+                  className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Algorithm</label>
+                <select name="algorithm" defaultValue="PPO"
+                  className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm">
+                  <option value="PPO">PPO</option>
+                  <option value="DQN">DQN</option>
+                  <option value="SAC">SAC</option>
+                  <option value="A2C">A2C</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">ONNX File</label>
+                <input name="file" type="file" accept=".onnx" required
+                  className="w-full text-sm file:mr-2 file:rounded-md file:border-0 file:bg-primary file:px-2 file:py-1 file:text-xs file:text-primary-foreground" />
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Button type="submit" size="sm" disabled={rlUploading}>
+                {rlUploading ? "Uploading..." : "Upload"}
+              </Button>
+              {rlMsg && <span className="text-xs text-muted-foreground">{rlMsg}</span>}
+            </div>
+          </form>
+
+          {/* List of RL models */}
+          {!rlModels || rlModels.models.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No RL models uploaded yet. Train a model externally and upload the ONNX file.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {rlModels.models.map((m) => (
+                <div key={m.id} className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <StatusBadge active={m.is_active} />
+                    <div className="min-w-0">
+                      <span className="font-mono text-sm font-medium">{m.name}</span>
+                      <span className="text-xs text-muted-foreground ml-2">v{m.version}</span>
+                      <span className="text-xs text-muted-foreground ml-2">({m.algorithm})</span>
+                      <div className="flex gap-3 text-xs text-muted-foreground mt-0.5">
+                        <span>{new Date(m.created_at).toLocaleDateString()}</span>
+                        {m.backtest_metrics && typeof m.backtest_metrics === "object" && (
+                          <>
+                            {(m.backtest_metrics as Record<string, unknown>).sharpe_ratio != null && (
+                              <span>Sharpe: {Number((m.backtest_metrics as Record<string, unknown>).sharpe_ratio).toFixed(2)}</span>
+                            )}
+                            {(m.backtest_metrics as Record<string, unknown>).total_return != null && (
+                              <span>Return: {Number((m.backtest_metrics as Record<string, unknown>).total_return).toFixed(1)}%</span>
+                            )}
+                          </>
+                        )}
+                        {m.activated_at && <span>Activated: {new Date(m.activated_at).toLocaleDateString()}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {m.is_active ? (
+                      <Button variant="outline" size="sm" className="h-7 px-2 text-xs"
+                        disabled={rlActivating === m.id}
+                        onClick={() => handleRlDeactivate(m.id)}>
+                        {rlActivating === m.id ? "..." : "Deactivate"}
+                      </Button>
+                    ) : (
+                      <>
+                        <Button variant="outline" size="sm" className="h-7 px-2 text-xs"
+                          disabled={rlActivating === m.id}
+                          onClick={() => handleRlActivate(m.id)}>
+                          {rlActivating === m.id ? "..." : "Activate"}
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-red-500"
+                          onClick={() => handleRlDelete(m.id)}>
+                          Delete
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </CardContent>

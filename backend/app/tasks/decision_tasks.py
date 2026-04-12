@@ -1,4 +1,9 @@
-"""Celery tasks for the decision engine cycle."""
+"""Celery tasks for the decision engine cycle.
+
+The decision engine has been simplified — it now delegates to the RL inference
+task in trading mode. This task is kept for backward compatibility but most
+logic now lives in rl_tasks.py.
+"""
 
 import asyncio
 import logging
@@ -31,16 +36,19 @@ def _run_async(coro):
 
 @celery_app.task(name="run_decision_cycle", bind=True, max_retries=1)
 def run_decision_cycle_task(self, force=False) -> dict:
-    """Aggregate signals → Claude decision → position sizing → risk check → propose trades.
+    """Legacy decision cycle — delegates to RL agent.
 
-    Runs every 30 minutes during market hours.
+    Kept for backward compatibility with existing Celery schedule.
+    In trading mode, prefer run_rl_inference_task directly.
     """
     from datetime import datetime, timezone
-    from app.tasks.task_status import is_system_paused
+    from app.tasks.task_status import is_system_paused, get_system_mode
     if not force and is_system_paused():
         return {"status": "system_paused"}
+    if not force and get_system_mode() != "trading":
+        return {"status": "skipped", "reason": "not in trading mode"}
 
-    logger.info("Starting decision cycle")
+    logger.info("Starting decision cycle (delegating to RL agent)")
 
     async def _run() -> dict:
         from app.engine.decision_engine import run_decision_cycle

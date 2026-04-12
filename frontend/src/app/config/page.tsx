@@ -9,13 +9,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, type RiskStatus, type SignalWeights, type SystemStatus, type BackupStatus } from "@/lib/api";
+import { api, type RiskStatus, type SystemStatus, type BackupStatus, type RLModelListResponse } from "@/lib/api";
 
 export default function ConfigPage() {
   const [risk, setRisk] = useState<RiskStatus | null>(null);
-  const [weights, setWeights] = useState<SignalWeights | null>(null);
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const [backup, setBackup] = useState<BackupStatus | null>(null);
+  const [rlModels, setRlModels] = useState<RLModelListResponse | null>(null);
+  const [systemMode, setSystemMode] = useState<string>("data_collection");
+  const [modeLoading, setModeLoading] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Editable risk config
@@ -28,25 +30,22 @@ export default function ConfigPage() {
     min_confidence: 0.6,
   });
 
-  // Editable weights
-  const [weightForm, setWeightForm] = useState({ ml: 0.3, claude: 0.4, analyst: 0.3 });
-
   const [savingRisk, setSavingRisk] = useState(false);
-  const [savingWeights, setSavingWeights] = useState(false);
   const [riskMsg, setRiskMsg] = useState<string | null>(null);
-  const [weightMsg, setWeightMsg] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
-        const [r, w, s] = await Promise.all([
+        const [r, s, rl, modeRes] = await Promise.all([
           api.risk.status(),
-          api.config.getWeights(),
           api.system.status(),
+          api.rlModels.list(),
+          api.dataCollection.getMode(),
         ]);
         setRisk(r);
-        setWeights(w);
         setSystem(s);
+        setRlModels(rl);
+        setSystemMode(modeRes.mode);
 
         api.system.backupStatus().then(setBackup).catch(() => {});
         setRiskForm({
@@ -57,7 +56,6 @@ export default function ConfigPage() {
           max_drawdown_pct: r.max_drawdown_pct,
           min_confidence: r.min_confidence,
         });
-        setWeightForm({ ml: w.ml, claude: w.claude, analyst: w.analyst });
       } catch {
         /* empty */
       } finally {
@@ -82,18 +80,15 @@ export default function ConfigPage() {
     }
   }
 
-  async function saveWeights() {
-    setSavingWeights(true);
-    setWeightMsg(null);
+  async function switchMode(mode: string) {
+    setModeLoading(true);
     try {
-      const w = await api.config.updateWeights(weightForm);
-      setWeights(w);
-      setWeightForm({ ml: w.ml, claude: w.claude, analyst: w.analyst });
-      setWeightMsg("Saved (normalized to sum 1.0)");
-    } catch (e) {
-      setWeightMsg(`Error: ${e instanceof Error ? e.message : "unknown"}`);
+      const res = await api.dataCollection.setMode(mode);
+      setSystemMode(res.mode);
+    } catch {
+      /* empty */
     } finally {
-      setSavingWeights(false);
+      setModeLoading(false);
     }
   }
 
@@ -110,82 +105,71 @@ export default function ConfigPage() {
       <div>
         <h2 className="text-3xl font-bold tracking-tight">Configuration</h2>
         <p className="text-muted-foreground">
-          System settings, risk parameters, and signal weights
+          System mode, risk parameters, and RL model settings
         </p>
       </div>
 
-      {/* ── Growth Mode ── */}
-      {system && (
-        <Card className={system.growth_mode ? "border-primary/50 bg-primary/5" : ""}>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Growth Mode</CardTitle>
-                <CardDescription>
-                  Seed the account and let the system manage it hands-off.
-                  It will invest, sell, and reinvest with the goal of growing
-                  account value. Enables auto-execute and portfolio-proportional
-                  position sizing.
-                </CardDescription>
-              </div>
-              <Button
-                variant={system.growth_mode ? "destructive" : "default"}
-                size="sm"
-                onClick={async () => {
-                  const next = !system.growth_mode;
-                  const res = await api.system.toggleAutonomousMode(next);
-                  setSystem((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          growth_mode: res.growth_mode,
-                          auto_execute: res.auto_execute,
-                        }
-                      : prev
-                  );
-                }}
-              >
-                {system.growth_mode ? "Disable" : "Enable"}
-              </Button>
+      {/* ── System Mode ── */}
+      <Card className={systemMode === "trading" ? "border-primary/50 bg-primary/5" : ""}>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>System Mode</CardTitle>
+              <CardDescription>
+                In <strong>data collection</strong> mode the system collects data and captures
+                state snapshots for RL training. In <strong>trading</strong> mode the RL agent
+                makes trade decisions using the loaded ONNX model.
+              </CardDescription>
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-3 gap-6">
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">Status</div>
-                <div
-                  className={`text-lg font-bold ${system.growth_mode ? "text-primary" : "text-muted-foreground"}`}
-                >
-                  {system.growth_mode ? "ACTIVE" : "Off"}
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">
-                  Portfolio Value
-                </div>
-                <div className="text-lg font-bold">
-                  ${system.portfolio_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">
-                  Buying Power
-                </div>
-                <div className="text-lg font-bold">
-                  ${system.buying_power.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
+            <Button
+              variant={systemMode === "trading" ? "destructive" : "default"}
+              size="sm"
+              disabled={modeLoading}
+              onClick={() => switchMode(systemMode === "trading" ? "data_collection" : "trading")}
+            >
+              {modeLoading
+                ? "Switching..."
+                : systemMode === "trading"
+                  ? "Switch to Data Collection"
+                  : "Switch to Trading"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-3 gap-6">
+            <div className="space-y-1">
+              <div className="text-sm text-muted-foreground">Current Mode</div>
+              <div className={`text-lg font-bold ${systemMode === "trading" ? "text-primary" : "text-yellow-500"}`}>
+                {systemMode === "trading" ? "TRADING" : "DATA COLLECTION"}
               </div>
             </div>
-            {system.growth_mode && (
-              <p className="mt-4 rounded-md bg-primary/10 px-3 py-2 text-sm text-primary">
-                The system is fully managing this account. Trades are
-                auto-approved, sized at up to 10% of portfolio per trade
-                (scaled by confidence), and all gains are reinvested.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+            <div className="space-y-1">
+              <div className="text-sm text-muted-foreground">RL Model</div>
+              <div className="text-lg font-bold">
+                {rlModels?.active_model_id
+                  ? rlModels.models.find((m) => m.id === rlModels.active_model_id)?.name ?? "Unknown"
+                  : "None loaded"}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="text-sm text-muted-foreground">Models Available</div>
+              <div className="text-lg font-bold">{rlModels?.models.length ?? 0}</div>
+            </div>
+          </div>
+          {systemMode === "trading" && !rlModels?.active_model_id && (
+            <p className="mt-4 rounded-md bg-yellow-500/10 px-3 py-2 text-sm text-yellow-500">
+              Trading mode is active but no RL model is loaded. Upload and activate a model
+              on the Models page.
+            </p>
+          )}
+          {systemMode === "data_collection" && (
+            <p className="mt-4 rounded-md bg-blue-500/10 px-3 py-2 text-sm text-blue-400">
+              Collecting data and capturing state snapshots. No trades will be proposed.
+              Switch to trading mode after training and uploading an RL model.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ── Risk Dashboard ── */}
       {risk && (
@@ -331,58 +315,7 @@ export default function ConfigPage() {
         </Card>
       )}
 
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* ── Signal Weights ── */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Signal Weights</CardTitle>
-            <CardDescription>
-              How much each signal source influences trading decisions
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {(["ml", "claude", "analyst"] as const).map((key) => (
-              <div key={key} className="space-y-1">
-                <div className="flex justify-between text-sm">
-                  <label className="font-medium capitalize">
-                    {key === "ml" ? "ML Technical" : key === "claude" ? "Claude Analysis" : "Analyst Input"}
-                  </label>
-                  <span className="text-muted-foreground">
-                    {(weightForm[key] * 100).toFixed(0)}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={Math.round(weightForm[key] * 100)}
-                  onChange={(e) =>
-                    setWeightForm((prev) => ({
-                      ...prev,
-                      [key]: parseInt(e.target.value) / 100,
-                    }))
-                  }
-                  className="w-full"
-                />
-              </div>
-            ))}
-            <div className="flex items-center gap-3">
-              <Button
-                onClick={saveWeights}
-                disabled={savingWeights}
-                size="sm"
-              >
-                {savingWeights ? "Saving..." : "Save Weights"}
-              </Button>
-              {weightMsg && (
-                <span className="text-xs text-muted-foreground">
-                  {weightMsg}
-                </span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
+      <div className="grid gap-6 md:grid-cols-1">
         {/* ── Risk Parameters ── */}
         <Card>
           <CardHeader>

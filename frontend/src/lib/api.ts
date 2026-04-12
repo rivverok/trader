@@ -216,12 +216,6 @@ export interface RiskStatus {
   sector_exposure: Record<string, number>;
 }
 
-export interface SignalWeights {
-  ml: number;
-  claude: number;
-  analyst: number;
-}
-
 // ── Portfolio & Execution types ─────────────────────────────────────
 
 export interface PositionItem {
@@ -273,8 +267,7 @@ export interface ExecutedTradeItem {
 }
 
 export interface SystemStatus {
-  auto_execute: boolean;
-  growth_mode: boolean;
+  system_mode: string;
   trading_paused: boolean;
   system_paused: boolean;
   trading_halted: boolean;
@@ -296,6 +289,77 @@ export interface BackupStatus {
   status: string | null;
   time: string | null;
   message: string | null;
+}
+
+// ── Data Collection types ───────────────────────────────────────────
+
+// ── RL Model types ──────────────────────────────────────────────────
+
+export interface RLModel {
+  id: number;
+  name: string;
+  version: string;
+  algorithm: string;
+  onnx_path: string;
+  state_spec: Record<string, unknown> | null;
+  action_spec: Record<string, unknown> | null;
+  training_metadata: Record<string, unknown> | null;
+  backtest_metrics: Record<string, unknown> | null;
+  is_active: boolean;
+  activated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RLModelListResponse {
+  models: RLModel[];
+  active_model_id: number | null;
+}
+
+export interface SnapshotSummary {
+  id: number;
+  timestamp: string;
+  snapshot_type: string;
+  stock_count: number;
+}
+
+export interface DataCollectionStatusResponse {
+  total_snapshots: number;
+  date_range: { first: string | null; last: string | null };
+  coverage: Record<string, number>;
+  latest_snapshot: SnapshotSummary | null;
+}
+
+export interface SnapshotListResponse {
+  total: number;
+  skip: number;
+  limit: number;
+  snapshots: Array<{
+    id: number;
+    timestamp: string;
+    snapshot_type: string;
+    stock_count: number;
+    portfolio_value: number | null;
+  }>;
+}
+
+export interface SnapshotDetail {
+  id: number;
+  timestamp: string;
+  snapshot_type: string;
+  portfolio_state: Record<string, unknown>;
+  market_state: Record<string, unknown>;
+  metadata: Record<string, unknown> | null;
+  stocks: Array<{
+    symbol: string;
+    price_data: Record<string, unknown>;
+    technical_indicators: Record<string, unknown> | null;
+    ml_signal: Record<string, unknown> | null;
+    sentiment: Record<string, unknown> | null;
+    synthesis: Record<string, unknown> | null;
+    analyst_input: Record<string, unknown> | null;
+    relative_strength: Record<string, unknown> | null;
+  }>;
 }
 
 // ── Analytics types ─────────────────────────────────────────────────
@@ -613,14 +677,6 @@ export const api = {
     resume: () =>
       fetchApi<{ status: string }>("/risk/resume", { method: "POST" }),
   },
-  config: {
-    getWeights: () => fetchApi<SignalWeights>("/config/weights"),
-    updateWeights: (weights: SignalWeights) =>
-      fetchApi<SignalWeights>("/config/weights", {
-        method: "PUT",
-        body: JSON.stringify(weights),
-      }),
-  },
   portfolio: {
     get: () => fetchApi<PortfolioResponse>("/portfolio"),
     history: (days = 90) =>
@@ -637,15 +693,6 @@ export const api = {
       fetchApi<{ status: string }>("/system/pause", { method: "POST" }),
     resume: () =>
       fetchApi<{ status: string }>("/system/resume", { method: "POST" }),
-    toggleAutoExecute: (enable: boolean) =>
-      fetchApi<{ auto_execute: boolean }>(`/system/auto-execute?enable=${enable}`, {
-        method: "POST",
-      }),
-    toggleAutonomousMode: (enable: boolean) =>
-      fetchApi<{ growth_mode: boolean; auto_execute: boolean }>(
-        `/system/growth-mode?enable=${enable}`,
-        { method: "POST" },
-      ),
     pauseSystem: () =>
       fetchApi<{ status: string }>("/system/pause-system", { method: "POST" }),
     resumeSystem: () =>
@@ -733,5 +780,52 @@ export const api = {
         `/tasks/schedules/${taskKey}`,
         { method: "DELETE" },
       ),
+  },
+  dataCollection: {
+    status: () =>
+      fetchApi<DataCollectionStatusResponse>("/data-collection/status"),
+    snapshots: (skip = 0, limit = 50) =>
+      fetchApi<SnapshotListResponse>(
+        `/data-collection/snapshots?skip=${skip}&limit=${limit}`
+      ),
+    triggerSnapshot: () =>
+      fetchApi<{ status: string; snapshot_id: number; timestamp: string; stock_count: number }>(
+        "/data-collection/snapshot",
+        { method: "POST" }
+      ),
+    snapshotDetail: (id: number) =>
+      fetchApi<SnapshotDetail>(`/data-collection/snapshots/${id}`),
+    getMode: () =>
+      fetchApi<{ mode: string }>("/system/mode"),
+    setMode: (mode: string) =>
+      fetchApi<{ mode: string; previous_mode: string }>("/system/mode", {
+        method: "PUT",
+        body: JSON.stringify({ mode }),
+      }),
+  },
+  rlModels: {
+    list: () => fetchApi<RLModelListResponse>("/rl-models"),
+    get: (id: number) => fetchApi<RLModel>(`/rl-models/${id}`),
+    upload: (formData: FormData) =>
+      fetch(`${API_BASE}/rl-models/upload`, {
+        method: "POST",
+        body: formData,
+      }).then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || res.statusText);
+        }
+        return res.json() as Promise<RLModel>;
+      }),
+    activate: (id: number) =>
+      fetchApi<RLModel>(`/rl-models/${id}/activate`, { method: "POST" }),
+    deactivate: (id: number) =>
+      fetchApi<{ status: string; message: string }>(`/rl-models/${id}/deactivate`, {
+        method: "POST",
+      }),
+    delete: (id: number) =>
+      fetchApi<{ status: string; message: string }>(`/rl-models/${id}`, {
+        method: "DELETE",
+      }),
   },
 };

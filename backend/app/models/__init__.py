@@ -14,6 +14,8 @@ from app.models.risk import RiskState
 from app.models.alert import Alert
 from app.models.discovery import WatchlistHint, DiscoveryLog
 from app.models.system_kv import SystemKV
+from app.models.rl_snapshot import RLStateSnapshot, RLStockSnapshot
+from app.models.rl_model import RLModel
 
 __all__ = [
     "TimestampMixin",
@@ -39,4 +41,7 @@ __all__ = [
     "WatchlistHint",
     "DiscoveryLog",
     "SystemKV",
+    "RLStateSnapshot",
+    "RLStockSnapshot",
+    "RLModel",
 ]

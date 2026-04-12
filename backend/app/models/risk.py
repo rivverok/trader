@@ -26,6 +26,11 @@ class RiskState(TimestampMixin, Base):
     max_drawdown_pct: Mapped[float] = mapped_column(Float, nullable=False, default=15.0)
     min_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.25)
 
+    # ── System mode ──
+    system_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="data_collection"
+    )  # data_collection, trading
+
     # ── System control flags ──
     auto_execute: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     growth_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

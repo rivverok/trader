@@ -33,9 +33,11 @@ def _run_async(coro):
 @shared_task(name="execute_approved_trades")
 def execute_approved_trades_task(force=False):
     """Execute all approved (but not yet executed) trades. Runs every 1 minute."""
-    from app.tasks.task_status import update_task_status, is_system_paused
+    from app.tasks.task_status import update_task_status, is_system_paused, get_system_mode
     if not force and is_system_paused():
         return {"status": "system_paused"}
+    if not force and get_system_mode() != "trading":
+        return {"status": "skipped", "reason": "not in trading mode"}
     result = _run_async(_execute_approved_trades())
     update_task_status("execute_approved_trades", result)
     return result

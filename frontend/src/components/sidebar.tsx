@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import {
   LayoutDashboard,
   Signal,
@@ -16,12 +18,14 @@ import {
   Activity,
   ListChecks,
   Brain,
+  Database,
 } from "lucide-react";
 import { AlertBell } from "@/components/alert-bell";
 
 const navItems = [
   { href: "/overview", label: "Overview", icon: Eye },
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/data-collection", label: "Data Collection", icon: Database },
   { href: "/watchlist", label: "Watchlist", icon: Telescope },
   { href: "/signals", label: "Signals", icon: Signal },
   { href: "/analyst", label: "Analyst", icon: PenLine },
@@ -36,6 +40,13 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [mode, setMode] = useState<string>("data_collection");
+
+  useEffect(() => {
+    api.dataCollection.getMode().then((r) => setMode(r.mode)).catch(() => {});
+  }, []);
+
+  const modeLabel = mode === "trading" ? "Trading" : "Data Collection";
 
   return (
     <aside className="flex h-screen w-64 flex-col border-r bg-card">
@@ -46,7 +57,7 @@ export function Sidebar() {
           </div>
           <div>
             <h1 className="text-lg font-bold leading-tight">AI Trader</h1>
-            <p className="text-xs text-muted-foreground">Paper Trading</p>
+            <p className="text-xs text-muted-foreground">{modeLabel}</p>
           </div>
         </div>
         <AlertBell />

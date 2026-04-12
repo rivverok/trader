@@ -52,6 +52,7 @@ export default function TradesPage() {
   const [trades, setTrades] = useState<ProposedTradeItem[]>([]);
   const [executedTrades, setExecutedTrades] = useState<ExecutedTradeItem[]>([]);
   const [risk, setRisk] = useState<RiskStatus | null>(null);
+  const [systemMode, setSystemMode] = useState<string>("data_collection");
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string | undefined>(undefined);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -80,6 +81,7 @@ export default function TradesPage() {
       setTrades(t);
       setRisk(r);
       setExecutedTrades(e);
+      api.dataCollection.getMode().then((m) => setSystemMode(m.mode)).catch(() => {});
     } catch {
       /* empty */
     } finally {
@@ -171,6 +173,18 @@ export default function TradesPage() {
               Resume Trading
             </Button>
           </div>
+        </div>
+      )}
+
+      {/* ── Data collection mode banner ── */}
+      {systemMode !== "trading" && (
+        <div className="rounded-lg border border-blue-500/50 bg-blue-500/10 p-4">
+          <h3 className="font-semibold text-blue-400">Data Collection Mode</h3>
+          <p className="text-sm text-blue-300">
+            Trading is disabled. The system is collecting data and capturing state
+            snapshots for RL training. Switch to trading mode on the Configuration
+            page when an RL model is loaded.
+          </p>
         </div>
       )}
 

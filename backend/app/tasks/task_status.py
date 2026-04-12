@@ -29,10 +29,12 @@ _TASK_TO_SCHEDULE_KEY = {
     "run_decision_cycle": "run-decision-cycle",
     "execute_approved_trades": "execute-approved-trades",
     "auto_execute_proposals": "auto-execute-proposals",
+    "run_rl_inference": "run-rl-inference",
     "sync_portfolio": "sync-portfolio",
     "check_stop_loss_orders": "check-stop-loss-orders",
     "discover_stocks": "discover-stocks",
     "check_model_staleness": "check-model-staleness",
+    "capture_state_snapshot": "capture-state-snapshot",
 }
 
 REDIS_KEY_PREFIX = "task_status:"
@@ -102,3 +104,29 @@ def is_system_paused() -> bool:
     except Exception as e:
         logger.warning("Failed to check system_paused: %s", e)
         return False
+
+
+def get_system_mode() -> str:
+    """Get the current system mode from the DB.
+
+    Returns 'data_collection' or 'trading'.
+    """
+    try:
+        import asyncio
+        from app.database import async_session, engine
+        from app.engine.risk_manager import get_risk_state
+
+        async def _check():
+            async with async_session() as db:
+                state = await get_risk_state(db)
+                return state.system_mode
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(engine.dispose())
+            return loop.run_until_complete(_check())
+        finally:
+            loop.close()
+    except Exception as e:
+        logger.warning("Failed to check system_mode: %s", e)
+        return "data_collection"

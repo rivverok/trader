@@ -167,8 +167,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>Auto-execute: {systemStatus?.auto_execute ? "ON" : "OFF"}</span>
-              {systemStatus?.growth_mode && <span>| <span className="text-primary font-medium">Growth</span></span>}
+              <span>Mode: {systemStatus?.system_mode === "trading" ? "Trading" : "Data Collection"}</span>
               {health && <span>| {health.trading_mode}</span>}
             </div>
           </CardContent>
@@ -207,17 +206,13 @@ export default function DashboardPage() {
               )}
               <Button
                 size="sm"
-                variant={systemStatus.auto_execute ? "secondary" : "default"}
-                onClick={() => api.system.toggleAutoExecute(!systemStatus.auto_execute).then(refresh)}
+                variant={systemStatus.system_mode === "trading" ? "secondary" : "default"}
+                onClick={() => {
+                  const nextMode = systemStatus.system_mode === "trading" ? "data_collection" : "trading";
+                  api.dataCollection.setMode(nextMode).then(refresh);
+                }}
               >
-                {systemStatus.auto_execute ? "Disable Auto-Execute" : "Enable Auto-Execute"}
-              </Button>
-              <Button
-                size="sm"
-                variant={systemStatus.growth_mode ? "secondary" : "default"}
-                onClick={() => api.system.toggleAutonomousMode(!systemStatus.growth_mode).then(refresh)}
-              >
-                {systemStatus.growth_mode ? "Disable Growth Mode" : "Enable Growth Mode"}
+                {systemStatus.system_mode === "trading" ? "Switch to Data Collection" : "Switch to Trading"}
               </Button>
               <Button
                 size="sm"

@@ -1,0 +1,25 @@
+# RL Training requirements (GPU training machine)
+# Install: pip install -r requirements-rl.txt
+
+# RL framework
+stable-baselines3>=2.3
+gymnasium>=0.29
+
+# PyTorch (SB3 backend) — install for your CUDA version
+# See: https://pytorch.org/get-started/locally/
+torch>=2.0
+
+# ONNX export + validation
+onnx>=1.15
+onnxruntime>=1.17
+
+# Data loading
+pandas>=2.1
+pyarrow>=15.0
+numpy>=1.26
+
+# Monitoring
+tensorboard>=2.15
+
+# Progress bars
+tqdm>=4.66

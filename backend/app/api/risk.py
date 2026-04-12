@@ -1,4 +1,4 @@
-"""API routes for risk status, config, signal weights, and resume."""
+"""API routes for risk status, config, and resume."""
 
 from datetime import datetime, timezone
 
@@ -45,18 +45,6 @@ class RiskConfigUpdate(BaseModel):
     daily_loss_limit: float | None = Field(default=None, gt=0)
     max_drawdown_pct: float | None = Field(default=None, gt=0, le=100)
     min_confidence: float | None = Field(default=None, ge=0, le=1)
-
-
-class WeightsResponse(BaseModel):
-    ml: float
-    claude: float
-    analyst: float
-
-
-class WeightsUpdate(BaseModel):
-    ml: float = Field(ge=0, le=1)
-    claude: float = Field(ge=0, le=1)
-    analyst: float = Field(ge=0, le=1)
 
 
 # ── Risk endpoints ───────────────────────────────────────────────────
@@ -147,44 +135,6 @@ async def resume_trading(db: AsyncSession = Depends(get_db)):
     state.halted_at = None
     await db.commit()
     return {"status": "resumed"}
-
-
-# ── Signal weight endpoints ──────────────────────────────────────────
-
-
-@router.get("/config/weights", response_model=WeightsResponse)
-async def get_weights():
-    """Get current signal weights."""
-    from app.config import settings
-    return WeightsResponse(
-        ml=settings.SIGNAL_WEIGHT_ML,
-        claude=settings.SIGNAL_WEIGHT_CLAUDE,
-        analyst=settings.SIGNAL_WEIGHT_ANALYST,
-    )
-
-
-@router.put("/config/weights", response_model=WeightsResponse)
-async def update_weights(body: WeightsUpdate):
-    """Update signal weights (runtime only — persists until restart).
-
-    For permanent changes, update .env file.
-    """
-    from app.config import settings
-    # Normalize so they sum to 1.0
-    total = body.ml + body.claude + body.analyst
-    if total <= 0:
-        from fastapi import HTTPException
-        raise HTTPException(400, "Weights must sum to > 0")
-
-    settings.SIGNAL_WEIGHT_ML = body.ml / total
-    settings.SIGNAL_WEIGHT_CLAUDE = body.claude / total
-    settings.SIGNAL_WEIGHT_ANALYST = body.analyst / total
-
-    return WeightsResponse(
-        ml=settings.SIGNAL_WEIGHT_ML,
-        claude=settings.SIGNAL_WEIGHT_CLAUDE,
-        analyst=settings.SIGNAL_WEIGHT_ANALYST,
-    )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

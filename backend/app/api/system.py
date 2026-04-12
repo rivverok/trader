@@ -19,8 +19,7 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 # ── Schemas ──────────────────────────────────────────────────────────
 
 class SystemStatus(BaseModel):
-    auto_execute: bool
-    growth_mode: bool
+    system_mode: str
     trading_paused: bool
     system_paused: bool
     trading_halted: bool
@@ -54,8 +53,7 @@ async def system_status(db: AsyncSession = Depends(get_db)):
     state = await get_risk_state(db)
     account = await get_account_info()
     return SystemStatus(
-        auto_execute=state.auto_execute,
-        growth_mode=state.growth_mode,
+        system_mode=state.system_mode,
         trading_paused=state.trading_paused,
         system_paused=state.system_paused,
         trading_halted=state.trading_halted,
@@ -245,4 +243,54 @@ async def get_backup_status(db: AsyncSession = Depends(get_db)):
         "status": rows.get("backup_last_status"),
         "time": rows.get("backup_last_time"),
         "message": rows.get("backup_last_message"),
+    }
+
+
+# ── System Mode ──────────────────────────────────────────────────────
+
+
+class SystemModeRequest(BaseModel):
+    mode: str = Field(pattern=r"^(data_collection|trading)$")
+
+
+@router.get("/mode")
+async def get_system_mode(db: AsyncSession = Depends(get_db)):
+    """Get current system mode (data_collection or trading)."""
+    state = await get_risk_state(db)
+    return {"mode": state.system_mode}
+
+
+@router.put("/mode")
+async def set_system_mode(
+    req: SystemModeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Switch system mode.
+
+    Switching to 'trading' requires an active RL model.
+    """
+    state = await get_risk_state(db)
+    old_mode = state.system_mode
+
+    if req.mode == "trading":
+        # Verify an active RL model exists
+        from app.models.rl_snapshot import RLStateSnapshot  # noqa: F401
+        from app.models.rl_model import RLModel
+        result = await db.execute(
+            select(RLModel).where(RLModel.is_active.is_(True)).limit(1)
+        )
+        active_model = result.scalar_one_or_none()
+        if not active_model:
+            raise HTTPException(
+                400,
+                detail="Cannot switch to trading mode — no active RL model loaded",
+            )
+
+    state.system_mode = req.mode
+    state.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {
+        "mode": req.mode,
+        "previous_mode": old_mode,
     }

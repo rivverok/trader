@@ -50,23 +50,14 @@ class Settings(BaseSettings):
     RISK_MAX_DRAWDOWN_PCT: float = 15.0
     RISK_MIN_CONFIDENCE: float = 0.25
 
-    # ── Signal Weights ──
-    SIGNAL_WEIGHT_ML: float = 0.3
-    SIGNAL_WEIGHT_CLAUDE: float = 0.4
-    SIGNAL_WEIGHT_ANALYST: float = 0.3
+    # ── RL Model Inference ──
+    RL_MODEL_DIR: str = "/data/rl_models"
 
     # ── Trading Parameters ──
     POSITION_SIZE_METHOD: str = "fixed_fractional"
     POSITION_SIZE_RISK_PCT: float = 2.0
     DEFAULT_STOP_LOSS_PCT: float = 5.0
     DEFAULT_TAKE_PROFIT_PCT: float = 10.0
-    AUTO_EXECUTE: bool = False
-
-    # ── Growth Mode ──
-    # When enabled, the system fully manages the account: auto-approves trades,
-    # sizes positions as a % of actual portfolio value, and reinvests profits.
-    GROWTH_MODE: bool = False
-    GROWTH_POSITION_PCT: float = 10.0  # Max % of portfolio per trade in growth mode
 
     # ── Scheduled Task Intervals (seconds) ──
     COLLECT_PRICES_INTERVAL_SEC: int = 60
@@ -76,7 +67,6 @@ class Settings(BaseSettings):
     ANALYZE_NEWS_INTERVAL_SEC: int = 900
     ANALYZE_FILINGS_INTERVAL_SEC: int = 3600
     CONTEXT_SYNTHESIS_INTERVAL_SEC: int = 7200
-    DECISION_CYCLE_INTERVAL_SEC: int = 1800
     ML_SIGNAL_INTERVAL_SEC: int = 3600
     PORTFOLIO_SYNC_INTERVAL_SEC: int = 300
 
