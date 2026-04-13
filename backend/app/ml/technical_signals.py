@@ -167,11 +167,14 @@ async def generate_all_signals(db_session: AsyncSession) -> dict[str, Any]:
 
     generated = 0
     errors = 0
+    skipped = 0
+    error_details: list[str] = []
 
     for stock in stocks:
         try:
             signal_data = await generate_signal(db_session, stock, model_registry)
             if signal_data is None:
+                skipped += 1
                 continue
 
             ml_signal = MLSignal(
@@ -185,14 +188,20 @@ async def generate_all_signals(db_session: AsyncSession) -> dict[str, Any]:
             db_session.add(ml_signal)
             generated += 1
         except Exception as e:
-            logger.error("Signal generation failed for %s: %s", stock.symbol, e)
+            logger.error("Signal generation failed for %s: %s", stock.symbol, e, exc_info=True)
             errors += 1
+            if len(error_details) < 3:
+                error_details.append(f"{stock.symbol}: {type(e).__name__}: {e}")
 
     await db_session.commit()
 
-    return {
+    result = {
         "status": "ok",
         "signals_generated": generated,
+        "skipped": skipped,
         "errors": errors,
         "model": f"{model_registry.model_name} {model_registry.version}",
     }
+    if error_details:
+        result["error_samples"] = error_details
+    return result
