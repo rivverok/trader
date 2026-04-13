@@ -12,8 +12,8 @@ down_revision = "0015"
 
 
 def upgrade() -> None:
-    op.drop_table("rl_stock_snapshots")
-    op.drop_table("rl_state_snapshots")
+    op.execute("DROP TABLE IF EXISTS rl_stock_snapshots")
+    op.execute("DROP TABLE IF EXISTS rl_state_snapshots")
 
 
 def downgrade() -> None:

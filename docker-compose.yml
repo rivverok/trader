@@ -54,7 +54,7 @@ services:
         condition: service_healthy
     volumes:
       - appdata:/app/data
-      - ${BACKUP_DIR:-/mnt/backup/trader_bkups}:/backups
+      - ${BACKUP_HOST_DIR:-./trader_bkups}:/backups
     command: celery -A app.celery_app worker --loglevel=info --concurrency=2
 
   # ── Celery Beat Scheduler ─────────────────────────────────
