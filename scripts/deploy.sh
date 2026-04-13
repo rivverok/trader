@@ -41,11 +41,11 @@ elif [ "$TARGET" = "frontend" ]; then
     echo ""
 elif [ "$TARGET" = "backend" ]; then
     echo "==> Building backend services..."
-    docker compose build api
+    docker compose build api worker scheduler
     echo ""
 elif [ "$TARGET" = "all" ]; then
     echo "==> Building all services..."
-    docker compose build api frontend
+    docker compose build api worker scheduler frontend
     echo ""
 else
     echo "Unknown target: $TARGET"
