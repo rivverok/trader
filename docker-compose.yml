@@ -40,6 +40,7 @@ services:
         condition: service_healthy
     volumes:
       - appdata:/app/data
+      - mlmodels:/app/backend/app/ml/models
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   # ── Celery Worker ─────────────────────────────────────────
@@ -54,6 +55,7 @@ services:
         condition: service_healthy
     volumes:
       - appdata:/app/data
+      - mlmodels:/app/backend/app/ml/models
       - ${BACKUP_HOST_DIR:-./trader_bkups}:/backups
     command: celery -A app.celery_app worker --loglevel=info --concurrency=2
 
@@ -69,6 +71,7 @@ services:
         condition: service_healthy
     volumes:
       - appdata:/app/data
+      - mlmodels:/app/backend/app/ml/models
     command: celery -A app.celery_app beat --loglevel=info --scheduler=app.dynamic_scheduler.DynamicScheduler
 
   # ── Next.js Frontend ──────────────────────────────────────
@@ -86,3 +89,4 @@ volumes:
   pgdata:
   redisdata:
   appdata:
+  mlmodels:
