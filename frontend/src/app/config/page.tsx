@@ -430,14 +430,27 @@ export default function ConfigPage() {
                 setBackingUp(true);
                 try {
                   await api.system.backupNow();
-                  // Poll for result after a short delay
-                  setTimeout(async () => {
+                  // Poll for result every 2s for up to 30s
+                  let attempts = 0;
+                  const poll = setInterval(async () => {
+                    attempts++;
                     try {
                       const b = await api.system.backupStatus();
-                      setBackup(b);
-                    } catch { /* empty */ }
-                    setBackingUp(false);
-                  }, 5000);
+                      if (b.status && b.time !== backup?.time) {
+                        setBackup(b);
+                        setBackingUp(false);
+                        clearInterval(poll);
+                      } else if (attempts >= 15) {
+                        setBackingUp(false);
+                        clearInterval(poll);
+                      }
+                    } catch {
+                      if (attempts >= 15) {
+                        setBackingUp(false);
+                        clearInterval(poll);
+                      }
+                    }
+                  }, 2000);
                 } catch {
                   setBackingUp(false);
                 }

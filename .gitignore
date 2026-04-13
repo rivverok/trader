@@ -42,3 +42,4 @@ data/
 *.csv
 *.parquet
 /backups
+/trader_bkups

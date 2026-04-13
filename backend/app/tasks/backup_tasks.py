@@ -20,38 +20,35 @@ RETAIN_DAYS = 30
 
 
 def _write_status(status: str, message: str):
-    """Write backup status to system_kv table."""
-    import asyncio
-
-    from sqlalchemy import text
-
-    from app.database import async_session, engine
+    """Write backup status to system_kv table (sync via psycopg2)."""
+    import psycopg2
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    async def _update():
-        async with async_session() as db:
-            await db.execute(
-                text(
+    dsn = (
+        f"host={settings.POSTGRES_HOST} port={settings.POSTGRES_PORT} "
+        f"dbname={settings.POSTGRES_DB} user={settings.POSTGRES_USER} "
+        f"password={settings.POSTGRES_PASSWORD}"
+    )
+    try:
+        conn = psycopg2.connect(dsn)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
                     """
                     INSERT INTO system_kv (key, value, updated_at)
-                    VALUES ('backup_last_status', :status, NOW()),
-                           ('backup_last_time', :time, NOW()),
-                           ('backup_last_message', :message, NOW())
+                    VALUES ('backup_last_status', %s, NOW()),
+                           ('backup_last_time', %s, NOW()),
+                           ('backup_last_message', %s, NOW())
                     ON CONFLICT (key) DO UPDATE
                         SET value = EXCLUDED.value, updated_at = NOW()
-                    """
-                ),
-                {"status": status, "time": now, "message": message},
-            )
-            await db.commit()
-
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(engine.dispose())
-        loop.run_until_complete(_update())
-    finally:
-        loop.close()
+                    """,
+                    (status, now, message),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.error("Failed to write backup status to DB: %s", exc)
 
 
 def _prune_old_backups(backup_dir: str):
