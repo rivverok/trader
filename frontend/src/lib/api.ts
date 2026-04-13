@@ -700,6 +700,10 @@ export const api = {
       }),
     backupStatus: () =>
       fetchApi<BackupStatus>("/system/backup-status"),
+    backupNow: () =>
+      fetchApi<{ task_id: string; status: string }>("/system/backup-now", {
+        method: "POST",
+      }),
   },
   analytics: {
     performance: () =>

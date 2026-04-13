@@ -246,6 +246,15 @@ async def get_backup_status(db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.post("/backup-now")
+async def trigger_backup_now():
+    """Trigger an immediate database backup via Celery."""
+    from app.tasks.backup_tasks import run_database_backup
+
+    task = run_database_backup.delay()
+    return {"task_id": task.id, "status": "started"}
+
+
 # ── System Mode ──────────────────────────────────────────────────────
 
 

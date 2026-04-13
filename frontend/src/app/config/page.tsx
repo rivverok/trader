@@ -32,6 +32,7 @@ export default function ConfigPage() {
 
   const [savingRisk, setSavingRisk] = useState(false);
   const [riskMsg, setRiskMsg] = useState<string | null>(null);
+  const [backingUp, setBackingUp] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -414,10 +415,37 @@ export default function ConfigPage() {
       {/* ── Backup Status ── */}
       <Card>
         <CardHeader>
-          <CardTitle>Database Backups</CardTitle>
-          <CardDescription>
-            Automatic daily backups to USB drive. Runs every day at 2 AM.
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Database Backups</CardTitle>
+              <CardDescription>
+                Automatic daily backups to USB drive. Runs every day at 2 AM.
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={backingUp}
+              onClick={async () => {
+                setBackingUp(true);
+                try {
+                  await api.system.backupNow();
+                  // Poll for result after a short delay
+                  setTimeout(async () => {
+                    try {
+                      const b = await api.system.backupStatus();
+                      setBackup(b);
+                    } catch { /* empty */ }
+                    setBackingUp(false);
+                  }, 5000);
+                } catch {
+                  setBackingUp(false);
+                }
+              }}
+            >
+              {backingUp ? "Backing up..." : "Backup Now"}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {backup?.status ? (
