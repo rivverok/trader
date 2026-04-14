@@ -112,15 +112,25 @@ async def sync_portfolio(db: AsyncSession) -> dict:
     prev_value = last_snap.total_value if last_snap else portfolio_value
     snapshot_daily_pnl = portfolio_value - prev_value
 
-    snapshot = PortfolioSnapshot(
-        timestamp=datetime.now(timezone.utc),
-        total_value=portfolio_value,
-        cash=cash,
-        positions_value=positions_value,
-        daily_pnl=snapshot_daily_pnl,
-        cumulative_pnl=prev_cumulative + snapshot_daily_pnl,
-    )
-    db.add(snapshot)
+    # Deduplicate: skip snapshot if previous one is recent and value unchanged
+    # (avoids flooding the table in data_collection mode with identical rows)
+    from datetime import timedelta
+    skip_snapshot = False
+    if last_snap and abs(portfolio_value - last_snap.total_value) < 0.01:
+        age = datetime.now(timezone.utc) - last_snap.timestamp.replace(tzinfo=timezone.utc)
+        if age < timedelta(minutes=55):
+            skip_snapshot = True
+
+    if not skip_snapshot:
+        snapshot = PortfolioSnapshot(
+            timestamp=datetime.now(timezone.utc),
+            total_value=portfolio_value,
+            cash=cash,
+            positions_value=positions_value,
+            daily_pnl=snapshot_daily_pnl,
+            cumulative_pnl=prev_cumulative + snapshot_daily_pnl,
+        )
+        db.add(snapshot)
 
     # Update risk manager peak
     await update_portfolio_peak(db, portfolio_value)

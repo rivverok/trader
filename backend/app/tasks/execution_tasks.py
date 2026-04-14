@@ -74,34 +74,39 @@ async def _execute_approved_trades():
 
 @shared_task(name="sync_portfolio")
 def sync_portfolio_task(force=False):
-    """Sync portfolio from Alpaca. Runs every 5 minutes in trading mode."""
+    """Sync portfolio from Alpaca. Runs every 5 minutes during market hours.
+
+    Always syncs positions and takes portfolio snapshots (needed for RL training
+    data even in data_collection mode). Trade order status sync only runs in
+    trading mode.
+    """
     from app.tasks.task_status import update_task_status, is_system_paused, get_system_mode
     if not force and is_system_paused():
         return {"status": "system_paused"}
-    if not force and get_system_mode() != "trading":
-        return {"status": "skipped", "reason": "not in trading mode"}
-    result = _run_async(_sync_portfolio())
+    mode = get_system_mode()
+    result = _run_async(_sync_portfolio(sync_trades=(mode == "trading")))
     update_task_status("sync_portfolio", result)
     return result
 
 
-async def _sync_portfolio():
+async def _sync_portfolio(sync_trades: bool = True):
     async with async_session() as db:
-        # Also sync pending/partial trade statuses
-        result = await db.execute(
-            select(Trade).where(Trade.status.in_(["pending", "partial"]))
-        )
-        pending_trades = result.scalars().all()
+        # Sync pending/partial trade statuses (only in trading mode)
+        if sync_trades:
+            result = await db.execute(
+                select(Trade).where(Trade.status.in_(["pending", "partial"]))
+            )
+            pending_trades = result.scalars().all()
 
-        for trade in pending_trades:
-            updated = await sync_order_status(db, trade)
-            # If a sell trade filled, record realized P&L
-            if updated.status == "filled" and updated.action == "sell" and updated.fill_price:
-                pnl = (updated.fill_price - updated.price) * updated.shares
-                if pnl < 0:
-                    await record_realized_loss(db, abs(pnl))
+            for trade in pending_trades:
+                updated = await sync_order_status(db, trade)
+                # If a sell trade filled, record realized P&L
+                if updated.status == "filled" and updated.action == "sell" and updated.fill_price:
+                    pnl = (updated.fill_price - updated.price) * updated.shares
+                    if pnl < 0:
+                        await record_realized_loss(db, abs(pnl))
 
-        # Sync positions and snapshots
+        # Sync positions and snapshots (always — needed for RL training data)
         summary = await sync_portfolio(db)
         return summary
 
